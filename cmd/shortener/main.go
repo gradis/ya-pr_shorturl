@@ -3,22 +3,34 @@ package main
 import (
 	"net/http"
 
+	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/config"
 	"github.com/gradis/ya-pr_shorturl/internal/handler"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
 
 func main() {
+	cfg := config.Parse()
+
 	repo := repository.NewMemoryRepository()
-	urlService := service.NewURLService(repo)
+	urlService := service.NewURLService(repo, cfg.BaseURL)
 	urlHandler := handler.NewURLHandler(urlService)
 
-	mux := http.NewServeMux()
+	router := gin.Default()
+	router.HandleMethodNotAllowed = true
 
-	mux.HandleFunc("/", urlHandler.Handle)
+	urlHandler.RegisterRoutes(router)
 
-	err := http.ListenAndServe(":8080", mux)
-	if err != nil {
+	router.NoRoute(func(c *gin.Context) {
+		c.String(http.StatusBadRequest, "bad request")
+	})
+
+	router.NoMethod(func(c *gin.Context) {
+		c.String(http.StatusBadRequest, "bad request")
+	})
+
+	if err := router.Run(cfg.ServerAddress); err != nil {
 		panic(err)
 	}
 }

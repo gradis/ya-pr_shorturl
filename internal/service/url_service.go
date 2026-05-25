@@ -6,9 +6,10 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"strings"
 )
 
-const baseURL = "http://localhost:8080/"
+const defaultBaseURL = "http://localhost:8080"
 
 var (
 	ErrUrlNotFound = errors.New("url not found")
@@ -22,11 +23,21 @@ type URLRepository interface {
 }
 
 type URLService struct {
-	repo URLRepository
+	repo    URLRepository
+	baseURL string
 }
 
-func NewURLService(repo URLRepository) *URLService {
-	return &URLService{repo: repo}
+func NewURLService(repo URLRepository, baseURL string) *URLService {
+	if baseURL == "" {
+		baseURL = defaultBaseURL
+	}
+
+	baseURL = strings.TrimRight(baseURL, "/")
+
+	return &URLService{
+		repo:    repo,
+		baseURL: baseURL,
+	}
 }
 
 func (s *URLService) AddUrl(originalURL string) (string, error) {
@@ -44,7 +55,8 @@ func (s *URLService) AddUrl(originalURL string) (string, error) {
 		return "", err
 	}
 
-	shortURL := fmt.Sprintf("%s%s", baseURL, id)
+	shortURL := fmt.Sprintf("%s/%s", s.baseURL, id)
+
 	return shortURL, nil
 }
 
@@ -93,7 +105,7 @@ func isValidURL(value string) bool {
 		return false
 	}
 
-	if parsedURL.Scheme == "" && parsedURL.Host != "" {
+	if parsedURL.Scheme == "" || parsedURL.Host == "" {
 		return false
 	}
 
