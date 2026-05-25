@@ -12,7 +12,7 @@ import (
 const defaultBaseURL = "http://localhost:8080"
 
 var (
-	ErrUrlNotFound = errors.New("url not found")
+	ErrURLNotFound = errors.New("url not found")
 	ErrInvalidURL  = errors.New("invalid URL")
 )
 
@@ -40,7 +40,7 @@ func NewURLService(repo URLRepository, baseURL string) *URLService {
 	}
 }
 
-func (s *URLService) AddUrl(originalURL string) (string, error) {
+func (s *URLService) AddURL(originalURL string) (string, error) {
 	if !isValidURL(originalURL) {
 		return "", ErrInvalidURL
 	}
@@ -60,10 +60,10 @@ func (s *URLService) AddUrl(originalURL string) (string, error) {
 	return shortURL, nil
 }
 
-func (s *URLService) GetUrlByID(id string) (string, error) {
+func (s *URLService) GetURLByID(id string) (string, error) {
 	originalURL, ok := s.repo.GetByID(id)
 	if !ok {
-		return "", ErrUrlNotFound
+		return "", ErrURLNotFound
 	}
 
 	return originalURL, nil

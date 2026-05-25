@@ -8,8 +8,8 @@ import (
 )
 
 type URLService interface {
-	AddUrl(originalURL string) (string, error)
-	GetUrlByID(id string) (string, error)
+	AddURL(originalURL string) (string, error)
+	GetURLByID(id string) (string, error)
 }
 
 type URLHandler struct {
@@ -40,7 +40,7 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 		return
 	}
 
-	shortURL, err := h.service.AddUrl(originalURL)
+	shortURL, err := h.service.AddURL(originalURL)
 	if err != nil {
 		c.String(http.StatusBadRequest, "bad request")
 		return
@@ -56,7 +56,7 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 		return
 	}
 
-	originalURL, err := h.service.GetUrlByID(id)
+	originalURL, err := h.service.GetURLByID(id)
 	if err != nil {
 		c.String(http.StatusBadRequest, "bad request")
 		return

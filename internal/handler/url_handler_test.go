@@ -14,14 +14,14 @@ type mockURLService struct {
 	getUrlByIDFunc func(id string) (string, error)
 }
 
-func (m *mockURLService) AddUrl(originalURL string) (string, error) {
+func (m *mockURLService) AddURL(originalURL string) (string, error) {
 	if m.addUrlFunc != nil {
 		return m.addUrlFunc(originalURL)
 	}
 	return "", nil
 }
 
-func (m *mockURLService) GetUrlByID(id string) (string, error) {
+func (m *mockURLService) GetURLByID(id string) (string, error) {
 	if m.getUrlByIDFunc != nil {
 		return m.getUrlByIDFunc(id)
 	}
