@@ -3,6 +3,8 @@ package main
 import (
 	"net/http"
 
+	"github.com/gin-gonic/gin"
+
 	"github.com/gradis/ya-pr_shorturl/internal/handler"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
@@ -13,11 +15,21 @@ func main() {
 	urlService := service.NewURLService(repo)
 	urlHandler := handler.NewURLHandler(urlService)
 
-	mux := http.NewServeMux()
+	router := gin.Default()
 
-	mux.HandleFunc("/", urlHandler.Handle)
+	router.HandleMethodNotAllowed = true
 
-	err := http.ListenAndServe(":8080", mux)
+	urlHandler.RegisterRoutes(router)
+
+	router.NoRoute(func(c *gin.Context) {
+		c.String(http.StatusBadRequest, "bad request")
+	})
+
+	router.NoMethod(func(c *gin.Context) {
+		c.String(http.StatusBadRequest, "bad request")
+	})
+
+	err := router.Run(":8080")
 	if err != nil {
 		panic(err)
 	}

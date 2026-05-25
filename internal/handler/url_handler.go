@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"fmt"
-	"io"
 	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 type URLService interface {
@@ -22,66 +22,45 @@ func NewURLHandler(service URLService) *URLHandler {
 	}
 }
 
-func (h *URLHandler) Handle(w http.ResponseWriter, r *http.Request) {
-	switch r.Method {
-	case http.MethodGet:
-		h.handleGet(w, r)
-	case http.MethodPost:
-		h.handlePost(w, r)
-	default:
-		w.WriteHeader(http.StatusBadRequest)
-	}
+func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
+	router.POST("/", h.handlePost)
+	router.GET("/:id", h.handleGet)
 }
 
-func (h *URLHandler) handlePost(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	body, err := io.ReadAll(r.Body)
+func (h *URLHandler) handlePost(c *gin.Context) {
+	body, err := c.GetRawData()
 	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
 
 	originalURL := strings.TrimSpace(string(body))
 	if originalURL == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
 
 	shortURL, err := h.service.AddUrl(originalURL)
 	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
-	_, _ = w.Write([]byte(shortURL))
+	c.Data(http.StatusCreated, "text/plain", []byte(shortURL))
 }
 
-func (h *URLHandler) handleGet(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "/" {
-		http.Error(w, "bad request", http.StatusBadRequest)
-		return
-	}
-
-	id := strings.TrimPrefix(r.URL.Path, "/")
-	id = strings.TrimSpace(id)
-
+func (h *URLHandler) handleGet(c *gin.Context) {
+	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
 
 	originalURL, err := h.service.GetUrlByID(id)
 	if err != nil {
-		http.Error(w, "bad request", http.StatusBadRequest)
+		c.String(http.StatusBadRequest, "bad request")
+		return
 	}
 
-	fmt.Println("aaa")
-	w.Header().Set("Location", originalURL)
-	w.WriteHeader(http.StatusTemporaryRedirect)
+	c.Redirect(http.StatusTemporaryRedirect, originalURL)
 }
