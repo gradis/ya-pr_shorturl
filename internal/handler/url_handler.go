@@ -61,12 +61,14 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 	originalURL, err := h.service.GetURLByID(id)
 	if err != nil {
 		switch {
+		case errors.Is(err, service.ErrInvalidURL):
+			c.String(http.StatusBadRequest, "bad request")
 		case errors.Is(err, service.ErrURLNotFound):
 			c.String(http.StatusNotFound, "url not found")
 		default:
 			c.String(http.StatusInternalServerError, "internal server error")
 		}
-		
+
 		return
 	}
 
