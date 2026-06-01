@@ -1,10 +1,12 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
 
 type URLService interface {
@@ -58,7 +60,13 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 
 	originalURL, err := h.service.GetURLByID(id)
 	if err != nil {
-		c.String(http.StatusBadRequest, "bad request")
+		switch {
+		case errors.Is(err, service.ErrURLNotFound):
+			c.String(http.StatusNotFound, "url not found")
+		default:
+			c.String(http.StatusInternalServerError, "internal server error")
+		}
+		
 		return
 	}
 
