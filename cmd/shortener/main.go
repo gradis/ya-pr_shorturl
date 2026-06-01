@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -31,6 +32,6 @@ func main() {
 	})
 
 	if err := router.Run(cfg.ServerAddress); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 }

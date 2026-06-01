@@ -70,7 +70,9 @@ func (s *URLService) GetURLByID(id string) (string, error) {
 }
 
 func (s *URLService) generateUniqueID() (string, error) {
-	for {
+	const maxAttempts = 10
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		id, err := generateID(8)
 		if err != nil {
 			return "", err
@@ -80,6 +82,8 @@ func (s *URLService) generateUniqueID() (string, error) {
 			return id, nil
 		}
 	}
+
+	return "", fmt.Errorf("failed to generate unique id after %d attempts", maxAttempts)
 }
 
 func generateID(length int) (string, error) {
