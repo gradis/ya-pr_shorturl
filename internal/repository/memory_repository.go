@@ -13,12 +13,16 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) Save(id string, originalURL string) error {
+func (r *MemoryRepository) SaveIfNotExists(id string, originalURL string) (bool, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if _, ok := r.urls[id]; ok {
+		return false, nil
+	}
+
 	r.urls[id] = originalURL
-	return nil
+	return true, nil
 }
 
 func (r *MemoryRepository) GetByID(id string) (string, bool) {

@@ -17,9 +17,8 @@ var (
 )
 
 type URLRepository interface {
-	Save(id string, originalURL string) error
+	SaveIfNotExists(id string, originalURL string) (bool, error)
 	GetByID(id string) (string, bool)
-	Exists(id string) bool
 }
 
 type URLService struct {
@@ -45,12 +44,7 @@ func (s *URLService) AddURL(originalURL string) (string, error) {
 		return "", ErrInvalidURL
 	}
 
-	id, err := s.generateUniqueID()
-	if err != nil {
-		return "", err
-	}
-
-	err = s.repo.Save(id, originalURL)
+	id, err := s.saveWithUniqueID(originalURL)
 	if err != nil {
 		return "", err
 	}
@@ -69,7 +63,7 @@ func (s *URLService) GetURLByID(id string) (string, error) {
 	return originalURL, nil
 }
 
-func (s *URLService) generateUniqueID() (string, error) {
+func (s *URLService) saveWithUniqueID(originalURL string) (string, error) {
 	const maxAttempts = 10
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -78,7 +72,12 @@ func (s *URLService) generateUniqueID() (string, error) {
 			return "", err
 		}
 
-		if !s.repo.Exists(id) {
+		saved, err := s.repo.SaveIfNotExists(id, originalURL)
+		if err != nil {
+			return "", err
+		}
+
+		if saved {
 			return id, nil
 		}
 	}
