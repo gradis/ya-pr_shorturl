@@ -11,6 +11,8 @@ import (
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
 
+var flagRunAddr string
+
 func main() {
 	cfg := config.Parse()
 
