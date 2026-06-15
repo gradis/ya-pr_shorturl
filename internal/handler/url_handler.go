@@ -24,9 +24,18 @@ func NewURLHandler(service URLService) *URLHandler {
 	}
 }
 
+type shortenRequest struct {
+	URL string `json:"url"`
+}
+
+type shortenResponse struct {
+	Result string `json:"result"`
+}
+
 func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
 	router.POST("/", h.handlePost)
 	router.GET("/:id", h.handleGet)
+	router.POST("/api/shorten", h.handleShortenJSON)
 }
 
 func (h *URLHandler) handlePost(c *gin.Context) {
@@ -73,4 +82,28 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusTemporaryRedirect, originalURL)
+}
+
+func (h *URLHandler) handleShortenJSON(c *gin.Context) {
+	var req shortenRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+
+	req.URL = strings.TrimSpace(req.URL)
+	if req.URL == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+
+	shortURL, err := h.service.AddURL(req.URL)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+
+	c.JSON(http.StatusCreated, shortenResponse{
+		Result: shortURL,
+	})
 }

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/repository"
+	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
 
 type mockURLService struct {
@@ -242,6 +245,71 @@ func TestURLHandler_BadMethod(t *testing.T) {
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestHandleShortenJSON(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080")
+	h := NewURLHandler(svc)
+
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	body := `{"url":"https://practicum.yandex.ru"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+
+	contentType := rec.Header().Get("Content-Type")
+	if !strings.Contains(contentType, "application/json") {
+		t.Fatalf("expected Content-Type application/json, got %q", contentType)
+	}
+
+	var resp struct {
+		Result string `json:"result"`
+	}
+
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if resp.Result == "" {
+		t.Fatal("expected non-empty result")
+	}
+
+	if !strings.HasPrefix(resp.Result, "http://localhost:8080/") {
+		t.Fatalf("unexpected short url: %q", resp.Result)
+	}
+}
+
+func TestHandleShortenJSON_BadRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080")
+	h := NewURLHandler(svc)
+
+	r := gin.New()
+	h.RegisterRoutes(r)
+
+	body := `{"url":`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
