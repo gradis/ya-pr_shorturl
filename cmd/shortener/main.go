@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gradis/ya-pr_shorturl/internal/config"
 	"github.com/gradis/ya-pr_shorturl/internal/handler"
+	"github.com/gradis/ya-pr_shorturl/internal/logger"
+	"github.com/gradis/ya-pr_shorturl/internal/middleware"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
@@ -20,7 +22,19 @@ func main() {
 	urlService := service.NewURLService(repo, cfg.BaseURL)
 	urlHandler := handler.NewURLHandler(urlService)
 
-	router := gin.Default()
+	logg, err := logger.New()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	defer func() {
+		_ = logg.Sync()
+	}()
+
+	router := gin.New()
+	router.Use(middleware.RequestLogger(logg))
+	router.Use(gin.Recovery())
+
 	router.HandleMethodNotAllowed = true
 
 	urlHandler.RegisterRoutes(router)
