@@ -13,12 +13,14 @@ import (
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
 
-var flagRunAddr string
-
 func main() {
 	cfg := config.Parse()
 
-	repo := repository.NewMemoryRepository()
+	repo, err := repository.NewFileRepository("storage.txt")
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	urlService := service.NewURLService(repo, cfg.BaseURL)
 	urlHandler := handler.NewURLHandler(urlService)
 
@@ -32,8 +34,10 @@ func main() {
 	}()
 
 	router := gin.New()
-	router.Use(middleware.RequestLogger(logg))
+
 	router.Use(gin.Recovery())
+	router.Use(middleware.RequestLogger(logg))
+	router.Use(middleware.Gzip())
 
 	router.HandleMethodNotAllowed = true
 

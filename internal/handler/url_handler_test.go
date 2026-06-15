@@ -1,14 +1,18 @@
 package handler
 
 import (
+	"bytes"
+	"compress/gzip"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/middleware"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
@@ -313,5 +317,91 @@ func TestHandleShortenJSON_BadRequest(t *testing.T) {
 
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+	}
+}
+
+func TestGzipResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080")
+	h := NewURLHandler(svc)
+
+	r := gin.New()
+	r.Use(middleware.Gzip())
+	h.RegisterRoutes(r)
+
+	reqBody := `{"url":"https://practicum.yandex.ru"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(reqBody))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept-Encoding", "gzip")
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+	}
+
+	if rec.Header().Get("Content-Encoding") != "gzip" {
+		t.Fatalf("expected gzip encoding, got %q", rec.Header().Get("Content-Encoding"))
+	}
+
+	gzReader, err := gzip.NewReader(rec.Body)
+	if err != nil {
+		t.Fatalf("failed to create gzip reader: %v", err)
+	}
+	defer gzReader.Close()
+
+	body, err := io.ReadAll(gzReader)
+	if err != nil {
+		t.Fatalf("failed to read gzip response: %v", err)
+	}
+
+	var resp struct {
+		Result string `json:"result"`
+	}
+
+	if err := json.Unmarshal(body, &resp); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if resp.Result == "" {
+		t.Fatal("expected non-empty result")
+	}
+}
+
+func TestGzipRequest(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080")
+	h := NewURLHandler(svc)
+
+	r := gin.New()
+	r.Use(middleware.Gzip())
+	h.RegisterRoutes(r)
+
+	var buf bytes.Buffer
+
+	gzWriter := gzip.NewWriter(&buf)
+	_, err := gzWriter.Write([]byte(`{"url":"https://practicum.yandex.ru"}`))
+	if err != nil {
+		t.Fatalf("failed to write gzip body: %v", err)
+	}
+
+	if err := gzWriter.Close(); err != nil {
+		t.Fatalf("failed to close gzip writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Encoding", "gzip")
+
+	rec := httptest.NewRecorder()
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
 	}
 }
