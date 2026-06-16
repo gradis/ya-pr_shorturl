@@ -16,7 +16,7 @@ import (
 func main() {
 	cfg := config.Parse()
 
-	repo, err := repository.NewFileRepository("storage.txt")
+	repo, err := repository.NewFileRepository(cfg.FileStoragePath)
 	if err != nil {
 		log.Fatal(err)
 	}

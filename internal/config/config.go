@@ -15,7 +15,7 @@ func Parse() *Config {
 	cfg := &Config{
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
-		FileStoragePath: "storage.json",
+		FileStoragePath: "storage",
 	}
 
 	flag.StringVar(
