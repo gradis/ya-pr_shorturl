@@ -157,12 +157,8 @@ func TestURLHandler_PostServiceError(t *testing.T) {
 
 	router.ServeHTTP(rec, req)
 
-	if rec.Code == http.StatusBadRequest {
+	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
-	}
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
 	}
 }
 
