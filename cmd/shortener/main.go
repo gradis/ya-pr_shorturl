@@ -1,7 +1,6 @@
 package main
 
 import (
-	"log"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -11,27 +10,30 @@ import (
 	"github.com/gradis/ya-pr_shorturl/internal/middleware"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
+	"go.uber.org/zap"
 )
 
 func main() {
-	cfg := config.Parse()
-
-	repo, err := repository.NewFileRepository(cfg.FileStoragePath)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	urlService := service.NewURLService(repo, cfg.BaseURL)
-	urlHandler := handler.NewURLHandler(urlService)
-
 	logg, err := logger.New()
 	if err != nil {
-		log.Fatal(err)
+		panic(err)
 	}
 
 	defer func() {
 		_ = logg.Sync()
 	}()
+
+	cfg := config.Parse()
+
+	repo, err := repository.NewFileRepository(cfg.FileStoragePath)
+	if err != nil {
+		logg.Fatal("failed to create file repository",
+			zap.String("file_storage_path", cfg.FileStoragePath),
+			zap.Error(err))
+	}
+
+	urlService := service.NewURLService(repo, cfg.BaseURL)
+	urlHandler := handler.NewURLHandler(urlService)
 
 	router := gin.New()
 
@@ -52,6 +54,10 @@ func main() {
 	})
 
 	if err := router.Run(cfg.ServerAddress); err != nil {
-		log.Fatal(err)
+		logg.Fatal(
+			"failed to run HTTP server",
+			zap.String("server_address", cfg.ServerAddress),
+			zap.Error(err),
+		)
 	}
 }

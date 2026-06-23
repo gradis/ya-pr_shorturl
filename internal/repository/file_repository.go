@@ -125,5 +125,37 @@ func (r *FileRepository) flush() error {
 		return err
 	}
 
-	return os.WriteFile(r.filePath, data, 0644)
+	tempFile, err := os.CreateTemp(dir, ".url-storage-*.tmp")
+	if err != nil {
+		return err
+	}
+
+	tempPath := tempFile.Name()
+
+	defer func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+	}()
+
+	if err := tempFile.Chmod(0644); err != nil {
+		return err
+	}
+
+	if _, err := tempFile.Write(data); err != nil {
+		return err
+	}
+
+	if err := tempFile.Sync(); err != nil {
+		return err
+	}
+
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, r.filePath); err != nil {
+		return err
+	}
+
+	return nil
 }

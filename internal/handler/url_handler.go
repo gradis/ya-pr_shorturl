@@ -53,7 +53,7 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 
 	shortURL, err := h.service.AddURL(originalURL)
 	if err != nil {
-		c.String(http.StatusBadRequest, "bad request")
+		h.handleTextServiceError(c, err)
 		return
 	}
 
@@ -69,15 +69,12 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 
 	originalURL, err := h.service.GetURLByID(id)
 	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrInvalidURL):
-			c.String(http.StatusBadRequest, "bad request")
-		case errors.Is(err, service.ErrURLNotFound):
+		if errors.Is(err, service.ErrURLNotFound) {
 			c.String(http.StatusNotFound, "url not found")
-		default:
-			c.String(http.StatusInternalServerError, "internal server error")
+			return
 		}
 
+		c.String(http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -86,6 +83,7 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 
 func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 	var req shortenRequest
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
 		return
@@ -99,11 +97,32 @@ func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 
 	shortURL, err := h.service.AddURL(req.URL)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		h.handleJSONServiceError(c, err)
 		return
 	}
 
 	c.JSON(http.StatusCreated, shortenResponse{
 		Result: shortURL,
 	})
+}
+
+func (h *URLHandler) handleTextServiceError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrInvalidURL) {
+		c.String(http.StatusBadRequest, "bad request")
+		return
+	}
+
+	c.String(http.StatusInternalServerError, "internal server error")
+}
+
+func (h *URLHandler) handleJSONServiceError(c *gin.Context, err error) {
+	if errors.Is(err, service.ErrInvalidURL) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+
+	c.JSON(
+		http.StatusInternalServerError,
+		gin.H{"error": "internal server error"},
+	)
 }
