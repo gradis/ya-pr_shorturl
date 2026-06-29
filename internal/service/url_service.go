@@ -1,12 +1,15 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/url"
 	"strings"
+
+	"github.com/gradis/ya-pr_shorturl/internal/repository"
 )
 
 const defaultBaseURL = "http://localhost:8080"
@@ -16,17 +19,12 @@ var (
 	ErrInvalidURL  = errors.New("invalid URL")
 )
 
-type URLRepository interface {
-	SaveIfNotExists(id string, originalURL string) (bool, error)
-	GetByID(id string) (string, bool)
-}
-
 type URLService struct {
-	repo    URLRepository
+	repo    repository.URLRepository
 	baseURL string
 }
 
-func NewURLService(repo URLRepository, baseURL string) *URLService {
+func NewURLService(repo repository.URLRepository, baseURL string) *URLService {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
@@ -39,14 +37,14 @@ func NewURLService(repo URLRepository, baseURL string) *URLService {
 	}
 }
 
-func (s *URLService) AddURL(originalURL string) (string, error) {
+func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, error) {
 	if !isValidURL(originalURL) {
 		return "", ErrInvalidURL
 	}
 
-	id, err := s.saveWithUniqueID(originalURL)
+	id, err := s.saveWithUniqueID(ctx, originalURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("save shortened URL: %w", err)
 	}
 
 	shortURL := fmt.Sprintf("%s/%s", s.baseURL, id)
@@ -54,16 +52,19 @@ func (s *URLService) AddURL(originalURL string) (string, error) {
 	return shortURL, nil
 }
 
-func (s *URLService) GetURLByID(id string) (string, error) {
-	originalURL, ok := s.repo.GetByID(id)
-	if !ok {
-		return "", ErrURLNotFound
+func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) {
+	originalURL, err := s.repo.GetById(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrURLNotFound) {
+			return "", ErrURLNotFound
+		}
+		return "", fmt.Errorf("get URL by ID: %w", err)
 	}
 
 	return originalURL, nil
 }
 
-func (s *URLService) saveWithUniqueID(originalURL string) (string, error) {
+func (s *URLService) saveWithUniqueID(ctx context.Context, originalURL string) (string, error) {
 	const maxAttempts = 10
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -72,9 +73,9 @@ func (s *URLService) saveWithUniqueID(originalURL string) (string, error) {
 			return "", err
 		}
 
-		saved, err := s.repo.SaveIfNotExists(id, originalURL)
+		saved, err := s.repo.SaveIfNotExist(ctx, id, originalURL)
 		if err != nil {
-			return "", err
+			return "", fmt.Errorf("save URL: %w", err)
 		}
 
 		if saved {

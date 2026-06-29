@@ -1,6 +1,9 @@
 package repository
 
-import "sync"
+import (
+	"context"
+	"sync"
+)
 
 type MemoryRepository struct {
 	mu   sync.RWMutex
@@ -13,7 +16,11 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
-func (r *MemoryRepository) SaveIfNotExists(id string, originalURL string) (bool, error) {
+func (r *MemoryRepository) SaveIfNotExist(ctx context.Context, id string, originalURL string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -25,13 +32,19 @@ func (r *MemoryRepository) SaveIfNotExists(id string, originalURL string) (bool,
 	return true, nil
 }
 
-func (r *MemoryRepository) GetByID(id string) (string, bool) {
+func (r *MemoryRepository) GetById(ctx context.Context, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	originalURL, ok := r.urls[id]
-
-	return originalURL, ok
+	originalURL, exists := r.urls[id]
+	if !exists {
+		return "", ErrURLNotFound
+	}
+	return originalURL, nil
 }
 
 func (r *MemoryRepository) Exists(id string) bool {
@@ -41,3 +54,5 @@ func (r *MemoryRepository) Exists(id string) bool {
 	_, ok := r.urls[id]
 	return ok
 }
+
+var _ URLRepository = (*MemoryRepository)(nil)

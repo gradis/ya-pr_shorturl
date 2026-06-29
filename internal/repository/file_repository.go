@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -34,11 +35,15 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 	return repo, nil
 }
 
-func (r *FileRepository) SaveIfNotExists(id string, originalURL string) (bool, error) {
+func (r *FileRepository) SaveIfNotExist(ctx context.Context, id string, originalURL string) (bool, error) {
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if _, ok := r.urls[id]; ok {
+	if _, exists := r.urls[id]; exists {
 		return false, nil
 	}
 
@@ -52,12 +57,20 @@ func (r *FileRepository) SaveIfNotExists(id string, originalURL string) (bool, e
 	return true, nil
 }
 
-func (r *FileRepository) GetByID(id string) (string, bool) {
+func (r *FileRepository) GetById(ctx context.Context, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	originalURL, ok := r.urls[id]
-	return originalURL, ok
+	originalURL, exists := r.urls[id]
+	if !exists {
+		return "", ErrURLNotFound
+	}
+
+	return originalURL, nil
 }
 
 func (r *FileRepository) Exists(id string) bool {
@@ -159,3 +172,5 @@ func (r *FileRepository) flush() error {
 
 	return nil
 }
+
+var _ URLRepository = (*FileRepository)(nil)
