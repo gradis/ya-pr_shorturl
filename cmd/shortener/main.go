@@ -6,11 +6,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gradis/ya-pr_shorturl/internal/config"
-	database "github.com/gradis/ya-pr_shorturl/internal/config/db"
 	"github.com/gradis/ya-pr_shorturl/internal/handler"
 	"github.com/gradis/ya-pr_shorturl/internal/logger"
 	"github.com/gradis/ya-pr_shorturl/internal/middleware"
-	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 	"go.uber.org/zap"
 )
@@ -27,25 +25,21 @@ func main() {
 
 	cfg := config.Parse()
 
-	db, err := database.New(context.Background(), cfg.DatabaseDSN)
+	storage, err := createStorage(
+		context.Background(),
+		*cfg,
+	)
 	if err != nil {
 		logg.Fatal(
-			"Failed to initialize database",
+			"failed to initialize storage",
 			zap.Error(err),
 		)
 	}
-	defer db.Close()
+	defer storage.close()
 
-	repo, err := repository.NewFileRepository(cfg.FileStoragePath)
-	if err != nil {
-		logg.Fatal("failed to create file repository",
-			zap.String("file_storage_path", cfg.FileStoragePath),
-			zap.Error(err))
-	}
-
-	urlService := service.NewURLService(repo, cfg.BaseURL)
+	urlService := service.NewURLService(storage.repository, cfg.BaseURL)
 	urlHandler := handler.NewURLHandler(urlService)
-	pingHandler := handler.NewPingHandler(db.Pool)
+	pingHandler := handler.NewPingHandler(storage.pinger)
 
 	router := gin.New()
 

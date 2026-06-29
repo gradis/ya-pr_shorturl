@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -10,8 +11,8 @@ import (
 )
 
 type URLService interface {
-	AddURL(originalURL string) (string, error)
-	GetURLByID(id string) (string, error)
+	AddURL(ctx context.Context, originalURL string) (string, error)
+	GetURLByID(ctx context.Context, id string) (string, error)
 }
 
 type URLHandler struct {
@@ -51,7 +52,7 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 		return
 	}
 
-	shortURL, err := h.service.AddURL(originalURL)
+	shortURL, err := h.service.AddURL(c.Request.Context(), originalURL)
 	if err != nil {
 		h.handleTextServiceError(c, err)
 		return
@@ -67,7 +68,7 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 		return
 	}
 
-	originalURL, err := h.service.GetURLByID(id)
+	originalURL, err := h.service.GetURLByID(c.Request.Context(), id)
 	if err != nil {
 		if errors.Is(err, service.ErrURLNotFound) {
 			c.String(http.StatusNotFound, "url not found")
@@ -95,7 +96,7 @@ func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 		return
 	}
 
-	shortURL, err := h.service.AddURL(req.URL)
+	shortURL, err := h.service.AddURL(c.Request.Context(), req.URL)
 	if err != nil {
 		h.handleJSONServiceError(c, err)
 		return
