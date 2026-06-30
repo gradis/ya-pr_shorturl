@@ -18,24 +18,6 @@ type storageDependencies struct {
 }
 
 func createStorage(ctx context.Context, cfg config.Config) (*storageDependencies, error) {
-	if strings.TrimSpace(cfg.DatabaseDSN) != "" {
-		db, err := database.New(ctx, cfg.DatabaseDSN)
-		if err != nil {
-			return nil, fmt.Errorf("initialize PostgreSQL: %w", err)
-		}
-
-		if err := repository.InitPostgresSchema(ctx, db.Pool); err != nil {
-			db.Close()
-			return nil, fmt.Errorf("initialize PostgreSQL schema: %w", err)
-		}
-
-		return &storageDependencies{
-			repository: repository.NewPostgresRepository(db.Pool),
-			pinger:     db.Pool,
-			close:      db.Close,
-		}, nil
-	}
-
 	if strings.TrimSpace(cfg.FileStoragePath) != "" {
 		fileRepo, err := repository.NewFileRepository(
 			cfg.FileStoragePath,
@@ -51,6 +33,24 @@ func createStorage(ctx context.Context, cfg config.Config) (*storageDependencies
 			repository: fileRepo,
 			pinger:     nil,
 			close:      func() {},
+		}, nil
+	}
+
+	if strings.TrimSpace(cfg.DatabaseDSN) != "" {
+		db, err := database.New(ctx, cfg.DatabaseDSN)
+		if err != nil {
+			return nil, fmt.Errorf("initialize PostgreSQL: %w", err)
+		}
+
+		if err := repository.InitPostgresSchema(ctx, db.Pool); err != nil {
+			db.Close()
+			return nil, fmt.Errorf("initialize PostgreSQL schema: %w", err)
+		}
+
+		return &storageDependencies{
+			repository: repository.NewPostgresRepository(db.Pool),
+			pinger:     db.Pool,
+			close:      db.Close,
 		}, nil
 	}
 
