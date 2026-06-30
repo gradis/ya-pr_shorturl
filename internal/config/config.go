@@ -16,42 +16,54 @@ func Parse() *Config {
 	cfg := &Config{
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
-		FileStoragePath: "storage.json",
-		DatabaseDSN:     "postgres://app:root@localhost:5432/short_url?sslmode=disable",
+		FileStoragePath: "",
+		DatabaseDSN:     "",
 	}
 
 	flag.StringVar(
 		&cfg.ServerAddress,
 		"a",
 		cfg.ServerAddress,
-		"HTTP server address")
+		"HTTP server address",
+	)
 
 	flag.StringVar(
 		&cfg.BaseURL,
 		"b",
 		cfg.BaseURL,
-		"base URL for shortened links",
+		"base URL",
 	)
-	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "file storage path")
 
-	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "database DSN")
+	flag.StringVar(
+		&cfg.FileStoragePath,
+		"f",
+		cfg.FileStoragePath,
+		"file storage path",
+	)
+
+	flag.StringVar(
+		&cfg.DatabaseDSN,
+		"d",
+		cfg.DatabaseDSN,
+		"database DSN",
+	)
 
 	flag.Parse()
 
-	if v := os.Getenv("SERVER_ADDRESS"); v != "" {
-		cfg.ServerAddress = v
+	if value, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
+		cfg.ServerAddress = value
 	}
 
-	if v := os.Getenv("BASE_URL"); v != "" {
-		cfg.BaseURL = v
+	if value, ok := os.LookupEnv("BASE_URL"); ok {
+		cfg.BaseURL = value
 	}
 
-	if v := os.Getenv("FILE_STORAGE_PATH"); v != "" {
-		cfg.FileStoragePath = v
+	if value, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
+		cfg.FileStoragePath = value
 	}
 
-	if v := os.Getenv("DATABASE_DSN"); v != "" {
-		cfg.DatabaseDSN = v
+	if value, ok := os.LookupEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = value
 	}
 
 	return cfg
