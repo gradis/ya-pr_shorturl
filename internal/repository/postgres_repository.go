@@ -31,9 +31,10 @@ func (r *PostgresRepository) SaveIfNotExist(ctx context.Context, id string, orig
 func (r *PostgresRepository) GetByID(ctx context.Context, id string) (string, error) {
 	const query = `SELECT short_url, original_url FROM urls WHERE short_url = $1;`
 
+	var shortURL string
 	var originalURL string
 
-	err := r.pool.QueryRow(ctx, query, id).Scan(&originalURL)
+	err := r.pool.QueryRow(ctx, query, id).Scan(&shortURL, &originalURL)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrURLNotFound

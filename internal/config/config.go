@@ -17,7 +17,7 @@ func Parse() *Config {
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "",
-		DatabaseDSN:     "",
+		DatabaseDSN:     "postgres://app:root@localhost:5432/shortener?sslmode=disable",
 	}
 
 	flag.StringVar(
