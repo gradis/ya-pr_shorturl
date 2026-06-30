@@ -32,7 +32,7 @@ func (r *MemoryRepository) SaveIfNotExist(ctx context.Context, id string, origin
 	return true, nil
 }
 
-func (r *MemoryRepository) GetById(ctx context.Context, id string) (string, error) {
+func (r *MemoryRepository) GetByID(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

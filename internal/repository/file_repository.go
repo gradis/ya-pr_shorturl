@@ -57,7 +57,7 @@ func (r *FileRepository) SaveIfNotExist(ctx context.Context, id string, original
 	return true, nil
 }
 
-func (r *FileRepository) GetById(ctx context.Context, id string) (string, error) {
+func (r *FileRepository) GetByID(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
 	}

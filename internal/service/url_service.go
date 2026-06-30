@@ -53,7 +53,7 @@ func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, er
 }
 
 func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) {
-	originalURL, err := s.repo.GetById(ctx, id)
+	originalURL, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		if errors.Is(err, repository.ErrURLNotFound) {
 			return "", ErrURLNotFound
