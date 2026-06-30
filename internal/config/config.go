@@ -3,6 +3,7 @@ package config
 import (
 	"flag"
 	"os"
+	"strings"
 )
 
 type Config struct {
@@ -50,21 +51,30 @@ func Parse() *Config {
 
 	flag.Parse()
 
-	if value, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
+	if value, ok := lookupNonEmptyEnv("SERVER_ADDRESS"); ok {
 		cfg.ServerAddress = value
 	}
 
-	if value, ok := os.LookupEnv("BASE_URL"); ok {
+	if value, ok := lookupNonEmptyEnv("BASE_URL"); ok {
 		cfg.BaseURL = value
 	}
 
-	if value, ok := os.LookupEnv("FILE_STORAGE_PATH"); ok {
+	if value, ok := lookupNonEmptyEnv("FILE_STORAGE_PATH"); ok {
 		cfg.FileStoragePath = value
 	}
 
-	if value, ok := os.LookupEnv("DATABASE_CONN_STRING"); ok {
+	if value, ok := lookupNonEmptyEnv("DATABASE_CONN_STRING"); ok {
 		cfg.DatabaseDSN = value
 	}
 
 	return cfg
+}
+
+func lookupNonEmptyEnv(key string) (string, bool) {
+	value, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", false
+	}
+
+	return value, true
 }
