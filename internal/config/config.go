@@ -16,7 +16,7 @@ func Parse() *Config {
 	cfg := &Config{
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
-		FileStoragePath: "storage",
+		FileStoragePath: "storage.json",
 		DatabaseDSN:     "postgres://app:root@localhost:5432/short_url?sslmode=disable",
 	}
 
