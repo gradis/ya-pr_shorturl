@@ -285,6 +285,57 @@ func TestURLHandler_PostInvalidURL(t *testing.T) {
 	}
 }
 
+func TestURLHandler_PostConflict(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+	router := newTestRouter(svc)
+
+	body := "https://example.com"
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader(body),
+	)
+	firstRec := httptest.NewRecorder()
+	router.ServeHTTP(firstRec, firstReq)
+
+	if firstRec.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected first status %d, got %d",
+			http.StatusCreated,
+			firstRec.Code,
+		)
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader(body),
+	)
+	secondRec := httptest.NewRecorder()
+	router.ServeHTTP(secondRec, secondReq)
+
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected second status %d, got %d",
+			http.StatusConflict,
+			secondRec.Code,
+		)
+	}
+
+	if secondRec.Body.String() != firstRec.Body.String() {
+		t.Fatalf(
+			"expected existing short URL %q, got %q",
+			firstRec.Body.String(),
+			secondRec.Body.String(),
+		)
+	}
+}
+
 func TestURLHandler_GetSuccess(t *testing.T) {
 	serviceCalled := false
 
@@ -547,6 +598,69 @@ func TestHandleShortenJSON_ServiceError(t *testing.T) {
 			"expected status %d, got %d",
 			http.StatusInternalServerError,
 			rec.Code,
+		)
+	}
+}
+
+func TestHandleShortenJSON_Conflict(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+	router := newTestRouter(svc)
+
+	body := `{"url":"https://practicum.yandex.ru"}`
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(body),
+	)
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	router.ServeHTTP(firstRec, firstReq)
+
+	if firstRec.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected first status %d, got %d",
+			http.StatusCreated,
+			firstRec.Code,
+		)
+	}
+
+	var firstResponse shortenResponse
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResponse); err != nil {
+		t.Fatalf("failed to unmarshal first response: %v", err)
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(body),
+	)
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	router.ServeHTTP(secondRec, secondReq)
+
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected second status %d, got %d",
+			http.StatusConflict,
+			secondRec.Code,
+		)
+	}
+
+	var secondResponse shortenResponse
+	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondResponse); err != nil {
+		t.Fatalf("failed to unmarshal second response: %v", err)
+	}
+
+	if secondResponse.Result != firstResponse.Result {
+		t.Fatalf(
+			"expected existing short URL %q, got %q",
+			firstResponse.Result,
+			secondResponse.Result,
 		)
 	}
 }

@@ -15,12 +15,12 @@ func TestFileRepository_SaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	saved, err := repo.SaveIfNotExist(ctx, "abc123", "https://practicum.yandex.ru")
+	result, err := repo.SaveURL(ctx, "abc123", "https://practicum.yandex.ru")
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if !saved {
+	if result.ID != "abc123" || result.Duplicate {
 		t.Fatal("expected url to be saved")
 	}
 
