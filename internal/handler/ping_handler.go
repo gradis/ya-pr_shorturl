@@ -25,6 +25,11 @@ func (h *PingHandler) RegisterRoutes(router gin.IRouter) {
 }
 
 func (h *PingHandler) handlePing(c *gin.Context) {
+	if h.db == nil {
+		c.Status(http.StatusServiceUnavailable)
+		return
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 
