@@ -66,6 +66,11 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 
 	shortURL, err := h.service.AddURL(c.Request.Context(), originalURL)
 	if err != nil {
+		if errors.Is(err, service.ErrURLAlreadyExists) {
+			c.Data(http.StatusConflict, "text/plain", []byte(shortURL))
+			return
+		}
+
 		h.handleTextServiceError(c, err)
 		return
 	}
@@ -110,6 +115,13 @@ func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 
 	shortURL, err := h.service.AddURL(c.Request.Context(), req.URL)
 	if err != nil {
+		if errors.Is(err, service.ErrURLAlreadyExists) {
+			c.JSON(http.StatusConflict, shortenResponse{
+				Result: shortURL,
+			})
+			return
+		}
+
 		h.handleJSONServiceError(c, err)
 		return
 	}

@@ -15,8 +15,9 @@ import (
 const defaultBaseURL = "http://localhost:8080"
 
 var (
-	ErrURLNotFound = errors.New("url not found")
-	ErrInvalidURL  = errors.New("invalid URL")
+	ErrURLNotFound      = errors.New("url not found")
+	ErrInvalidURL       = errors.New("invalid URL")
+	ErrURLAlreadyExists = errors.New("URL already exists")
 )
 
 type URLService struct {
@@ -52,12 +53,15 @@ func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, er
 		return "", ErrInvalidURL
 	}
 
-	id, err := s.saveWithUniqueID(ctx, originalURL)
+	id, duplicate, err := s.saveWithUniqueID(ctx, originalURL)
 	if err != nil {
 		return "", fmt.Errorf("save shortened URL: %w", err)
 	}
 
 	shortURL := fmt.Sprintf("%s/%s", s.baseURL, id)
+	if duplicate {
+		return shortURL, ErrURLAlreadyExists
+	}
 
 	return shortURL, nil
 }
@@ -87,11 +91,40 @@ func (s *URLService) AddBatchURLs(ctx context.Context, urls []BatchURL) ([]Batch
 		})
 	}
 
-	if err := s.repo.SaveBatch(ctx, records); err != nil {
+	savedRecords, err := s.repo.SaveBatch(ctx, records)
+	if err != nil {
 		return nil, fmt.Errorf("save shortened URL batch: %w", err)
 	}
 
+	for i, record := range savedRecords {
+		results[i].ShortURL = fmt.Sprintf("%s/%s", s.baseURL, record.ID)
+	}
+
 	return results, nil
+}
+
+func (s *URLService) saveWithUniqueID(ctx context.Context, originalURL string) (string, bool, error) {
+	const maxAttempts = 10
+
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		id, err := generateID(8)
+		if err != nil {
+			return "", false, err
+		}
+
+		result, err := s.repo.SaveURL(ctx, id, originalURL)
+		if err != nil {
+			if errors.Is(err, repository.ErrURLIDConflict) {
+				continue
+			}
+
+			return "", false, fmt.Errorf("save URL: %w", err)
+		}
+
+		return result.ID, result.Duplicate, nil
+	}
+
+	return "", false, fmt.Errorf("failed to generate unique id after %d attempts", maxAttempts)
 }
 
 func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) {
@@ -104,28 +137,6 @@ func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) 
 	}
 
 	return originalURL, nil
-}
-
-func (s *URLService) saveWithUniqueID(ctx context.Context, originalURL string) (string, error) {
-	const maxAttempts = 10
-
-	for attempt := 0; attempt < maxAttempts; attempt++ {
-		id, err := generateID(8)
-		if err != nil {
-			return "", err
-		}
-
-		saved, err := s.repo.SaveIfNotExist(ctx, id, originalURL)
-		if err != nil {
-			return "", fmt.Errorf("save URL: %w", err)
-		}
-
-		if saved {
-			return id, nil
-		}
-	}
-
-	return "", fmt.Errorf("failed to generate unique id after %d attempts", maxAttempts)
 }
 
 func generateID(length int) (string, error) {

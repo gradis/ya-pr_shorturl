@@ -6,45 +6,71 @@ import (
 )
 
 type MemoryRepository struct {
-	mu   sync.RWMutex
-	urls map[string]string
+	mu          sync.RWMutex
+	urls        map[string]string
+	originalIDs map[string]string
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		urls: make(map[string]string),
+		urls:        make(map[string]string),
+		originalIDs: make(map[string]string),
 	}
 }
 
-func (r *MemoryRepository) SaveIfNotExist(ctx context.Context, id string, originalURL string) (bool, error) {
+func (r *MemoryRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
 	if err := ctx.Err(); err != nil {
-		return false, err
+		return URLSaveResult{}, err
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	if existingID, ok := r.originalIDs[originalURL]; ok {
+		return URLSaveResult{
+			ID:        existingID,
+			Duplicate: true,
+		}, nil
+	}
+
 	if _, ok := r.urls[id]; ok {
-		return false, nil
+		return URLSaveResult{}, ErrURLIDConflict
 	}
 
 	r.urls[id] = originalURL
-	return true, nil
+	r.originalIDs[originalURL] = id
+
+	return URLSaveResult{ID: id}, nil
 }
 
-func (r *MemoryRepository) SaveBatch(ctx context.Context, records []URLRecord) error {
+func (r *MemoryRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]URLRecord, error) {
 	if err := ctx.Err(); err != nil {
-		return err
+		return nil, err
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	result := make([]URLRecord, 0, len(records))
 	for _, record := range records {
+		if existingID, ok := r.originalIDs[record.OriginalURL]; ok {
+			result = append(result, URLRecord{
+				ID:          existingID,
+				OriginalURL: record.OriginalURL,
+			})
+			continue
+		}
+
+		if _, ok := r.urls[record.ID]; ok {
+			return nil, ErrURLIDConflict
+		}
+
 		r.urls[record.ID] = record.OriginalURL
+		r.originalIDs[record.OriginalURL] = record.ID
+		result = append(result, record)
 	}
 
-	return nil
+	return result, nil
 }
 
 func (r *MemoryRepository) GetByID(ctx context.Context, id string) (string, error) {
