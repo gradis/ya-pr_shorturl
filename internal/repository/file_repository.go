@@ -1,6 +1,8 @@
 package repository
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -99,6 +101,29 @@ func (r *FileRepository) load() error {
 		return nil
 	}
 
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("[")) {
+		return r.loadJSONRecords(data)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var record FileRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			return err
+		}
+
+		r.urls[record.ShortURL] = record.OriginalURL
+	}
+
+	return scanner.Err()
+}
+
+func (r *FileRepository) loadJSONRecords(data []byte) error {
 	var records []FileRecord
 	if err := json.Unmarshal(data, &records); err != nil {
 		return err
@@ -133,9 +158,13 @@ func (r *FileRepository) flush() error {
 		i++
 	}
 
-	data, err := json.MarshalIndent(records, "", "  ")
-	if err != nil {
-		return err
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+
+	for _, record := range records {
+		if err := encoder.Encode(record); err != nil {
+			return err
+		}
 	}
 
 	tempFile, err := os.CreateTemp(dir, ".url-storage-*.tmp")
@@ -154,7 +183,7 @@ func (r *FileRepository) flush() error {
 		return err
 	}
 
-	if _, err := tempFile.Write(data); err != nil {
+	if _, err := tempFile.Write(buffer.Bytes()); err != nil {
 		return err
 	}
 
