@@ -12,6 +12,7 @@ import (
 
 type URLService interface {
 	AddURL(ctx context.Context, originalURL string) (string, error)
+	AddBatchURLs(ctx context.Context, urls []service.BatchURL) ([]service.BatchURLResult, error)
 	GetURLByID(ctx context.Context, id string) (string, error)
 }
 
@@ -33,10 +34,21 @@ type shortenResponse struct {
 	Result string `json:"result"`
 }
 
+type batchShortenRequest struct {
+	CorrelationID string `json:"correlation_id"`
+	OriginalURL   string `json:"original_url"`
+}
+
+type batchShortenResponse struct {
+	CorrelationID string `json:"correlation_id"`
+	ShortURL      string `json:"short_url"`
+}
+
 func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
 	router.POST("/", h.handlePost)
 	router.GET("/:id", h.handleGet)
 	router.POST("/api/shorten", h.handleShortenJSON)
+	router.POST("/api/shorten/batch", h.handleShortenBatch)
 }
 
 func (h *URLHandler) handlePost(c *gin.Context) {
@@ -105,6 +117,50 @@ func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 	c.JSON(http.StatusCreated, shortenResponse{
 		Result: shortURL,
 	})
+}
+
+func (h *URLHandler) handleShortenBatch(c *gin.Context) {
+	var req []batchShortenRequest
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+
+	if len(req) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+		return
+	}
+
+	urls := make([]service.BatchURL, 0, len(req))
+	for _, item := range req {
+		originalURL := strings.TrimSpace(item.OriginalURL)
+		if originalURL == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "bad request"})
+			return
+		}
+
+		urls = append(urls, service.BatchURL{
+			CorrelationID: item.CorrelationID,
+			OriginalURL:   originalURL,
+		})
+	}
+
+	results, err := h.service.AddBatchURLs(c.Request.Context(), urls)
+	if err != nil {
+		h.handleJSONServiceError(c, err)
+		return
+	}
+
+	response := make([]batchShortenResponse, 0, len(results))
+	for _, result := range results {
+		response = append(response, batchShortenResponse{
+			CorrelationID: result.CorrelationID,
+			ShortURL:      result.ShortURL,
+		})
+	}
+
+	c.JSON(http.StatusCreated, response)
 }
 
 func (h *URLHandler) handleTextServiceError(c *gin.Context, err error) {

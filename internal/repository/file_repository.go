@@ -59,6 +59,39 @@ func (r *FileRepository) SaveIfNotExist(ctx context.Context, id string, original
 	return true, nil
 }
 
+func (r *FileRepository) SaveBatch(ctx context.Context, records []URLRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rollback := make(map[string]string, len(records))
+	for _, record := range records {
+		if current, exists := r.urls[record.ID]; exists {
+			rollback[record.ID] = current
+		}
+
+		r.urls[record.ID] = record.OriginalURL
+	}
+
+	if err := r.flush(); err != nil {
+		for _, record := range records {
+			if previous, exists := rollback[record.ID]; exists {
+				r.urls[record.ID] = previous
+				continue
+			}
+
+			delete(r.urls, record.ID)
+		}
+
+		return err
+	}
+
+	return nil
+}
+
 func (r *FileRepository) GetByID(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err

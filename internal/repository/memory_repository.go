@@ -32,6 +32,21 @@ func (r *MemoryRepository) SaveIfNotExist(ctx context.Context, id string, origin
 	return true, nil
 }
 
+func (r *MemoryRepository) SaveBatch(ctx context.Context, records []URLRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, record := range records {
+		r.urls[record.ID] = record.OriginalURL
+	}
+
+	return nil
+}
+
 func (r *MemoryRepository) GetByID(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err

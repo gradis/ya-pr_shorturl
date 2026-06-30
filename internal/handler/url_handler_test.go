@@ -28,6 +28,11 @@ type mockURLService struct {
 		ctx context.Context,
 		id string,
 	) (string, error)
+
+	addBatchURLsFunc func(
+		ctx context.Context,
+		urls []service.BatchURL,
+	) ([]service.BatchURLResult, error)
 }
 
 var _ URLService = (*mockURLService)(nil)
@@ -52,6 +57,17 @@ func (m *mockURLService) GetURLByID(
 	}
 
 	return "", nil
+}
+
+func (m *mockURLService) AddBatchURLs(
+	ctx context.Context,
+	urls []service.BatchURL,
+) ([]service.BatchURLResult, error) {
+	if m.addBatchURLsFunc != nil {
+		return m.addBatchURLsFunc(ctx, urls)
+	}
+
+	return nil, nil
 }
 
 func newTestRouter(s URLService) *gin.Engine {
@@ -530,6 +546,82 @@ func TestHandleShortenJSON_ServiceError(t *testing.T) {
 		t.Fatalf(
 			"expected status %d, got %d",
 			http.StatusInternalServerError,
+			rec.Code,
+		)
+	}
+}
+
+func TestHandleShortenBatch(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+	router := newTestRouter(svc)
+
+	body := `[
+		{"correlation_id":"first","original_url":"https://practicum.yandex.ru"},
+		{"correlation_id":"second","original_url":"https://example.com"}
+	]`
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten/batch",
+		strings.NewReader(body),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusCreated,
+			rec.Code,
+		)
+	}
+
+	var response []batchShortenResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if len(response) != 2 {
+		t.Fatalf("expected 2 response items, got %d", len(response))
+	}
+
+	if response[0].CorrelationID != "first" {
+		t.Fatalf(
+			"expected first correlation_id, got %q",
+			response[0].CorrelationID,
+		)
+	}
+
+	for _, item := range response {
+		if !strings.HasPrefix(item.ShortURL, "http://localhost:8080/") {
+			t.Fatalf("unexpected short URL: %q", item.ShortURL)
+		}
+	}
+}
+
+func TestHandleShortenBatch_Empty(t *testing.T) {
+	router := newTestRouter(&mockURLService{})
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten/batch",
+		strings.NewReader(`[]`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
 			rec.Code,
 		)
 	}
