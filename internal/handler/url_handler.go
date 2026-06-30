@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 
@@ -53,8 +54,23 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 	}
 
 	shortURL, err := h.service.AddURL(c.Request.Context(), originalURL)
+	//if err != nil {
+	//	h.handleTextServiceError(c, err)
+	//	return
+	//}
+
 	if err != nil {
-		h.handleTextServiceError(c, err)
+		fmt.Printf("AddURL error: %+v\n", err)
+
+		if errors.Is(err, service.ErrInvalidURL) {
+			c.String(http.StatusBadRequest, "bad request")
+			return
+		}
+
+		c.String(
+			http.StatusInternalServerError,
+			"internal server error",
+		)
 		return
 	}
 
@@ -63,12 +79,14 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 
 func (h *URLHandler) handleGet(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
+	fmt.Printf("id: %s\n", id)
 	if id == "" {
 		c.String(http.StatusBadRequest, "bad request")
 		return
 	}
 
 	originalURL, err := h.service.GetURLByID(c.Request.Context(), id)
+	fmt.Printf("originalURL: %s\n", originalURL)
 	if err != nil {
 		if errors.Is(err, service.ErrURLNotFound) {
 			c.String(http.StatusNotFound, "url not found")
