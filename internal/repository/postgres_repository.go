@@ -5,12 +5,28 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
+}
+
+func InitPostgresSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	const query = `
+CREATE TABLE IF NOT EXISTS urls (
+	id BIGSERIAL PRIMARY KEY,
+	short_url VARCHAR(255) NOT NULL UNIQUE,
+	original_url TEXT NOT NULL,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);`
+
+	if _, err := pool.Exec(ctx, query); err != nil {
+		return fmt.Errorf("create urls table: %w", err)
+	}
+
+	return nil
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
@@ -26,6 +42,31 @@ func (r *PostgresRepository) SaveIfNotExist(ctx context.Context, id string, orig
 	}
 
 	return tag.RowsAffected() == 1, nil
+}
+
+func (r *PostgresRepository) SaveBatch(ctx context.Context, records []URLRecord) error {
+	const query = `INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT (short_url) DO NOTHING;`
+
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+
+	defer func() {
+		_ = tx.Rollback(ctx)
+	}()
+
+	for _, record := range records {
+		if _, err := tx.Exec(ctx, query, record.ID, record.OriginalURL); err != nil {
+			return fmt.Errorf("insert URL: %w", err)
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	return nil
 }
 
 func (r *PostgresRepository) GetByID(ctx context.Context, id string) (string, error) {

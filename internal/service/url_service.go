@@ -24,6 +24,16 @@ type URLService struct {
 	baseURL string
 }
 
+type BatchURL struct {
+	CorrelationID string
+	OriginalURL   string
+}
+
+type BatchURLResult struct {
+	CorrelationID string
+	ShortURL      string
+}
+
 func NewURLService(repo repository.URLRepository, baseURL string) *URLService {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
@@ -50,6 +60,38 @@ func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, er
 	shortURL := fmt.Sprintf("%s/%s", s.baseURL, id)
 
 	return shortURL, nil
+}
+
+func (s *URLService) AddBatchURLs(ctx context.Context, urls []BatchURL) ([]BatchURLResult, error) {
+	records := make([]repository.URLRecord, 0, len(urls))
+	results := make([]BatchURLResult, 0, len(urls))
+
+	for _, item := range urls {
+		if !isValidURL(item.OriginalURL) {
+			return nil, ErrInvalidURL
+		}
+
+		id, err := generateID(8)
+		if err != nil {
+			return nil, err
+		}
+
+		records = append(records, repository.URLRecord{
+			ID:          id,
+			OriginalURL: item.OriginalURL,
+		})
+
+		results = append(results, BatchURLResult{
+			CorrelationID: item.CorrelationID,
+			ShortURL:      fmt.Sprintf("%s/%s", s.baseURL, id),
+		})
+	}
+
+	if err := s.repo.SaveBatch(ctx, records); err != nil {
+		return nil, fmt.Errorf("save shortened URL batch: %w", err)
+	}
+
+	return results, nil
 }
 
 func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) {
