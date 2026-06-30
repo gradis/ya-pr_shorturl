@@ -28,7 +28,7 @@ func (r *PostgresRepository) SaveIfNotExist(ctx context.Context, id string, orig
 	return tag.RowsAffected() == 1, nil
 }
 
-func (r *PostgresRepository) GetById(ctx context.Context, id string) (string, error) {
+func (r *PostgresRepository) GetByID(ctx context.Context, id string) (string, error) {
 	const query = `SELECT short_url, original_url FROM urls WHERE short_url = $1;`
 
 	var originalURL string

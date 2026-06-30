@@ -29,7 +29,7 @@ func TestFileRepository_SaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, err := repo2.GetById(ctx, "abc123")
+	got, err := repo2.GetByID(ctx, "abc123")
 	if err != nil {
 		t.Fatal("expected url to be restored")
 	}
