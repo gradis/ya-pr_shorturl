@@ -24,7 +24,7 @@ func Parse() *Config {
 		&cfg.ServerAddress,
 		"a",
 		cfg.ServerAddress,
-		"HTTP server address",
+		"server address",
 	)
 
 	flag.StringVar(
@@ -64,7 +64,7 @@ func Parse() *Config {
 		cfg.FileStoragePath = value
 	}
 
-	if value, ok := os.LookupEnv("DATABASE_DSN"); ok {
+	if value, ok := os.LookupEnv("DATABASE_CONN_STRING"); ok {
 		cfg.DatabaseDSN = value
 	}
 
