@@ -1,11 +1,13 @@
 package repository
 
 import (
+	"context"
 	"path/filepath"
 	"testing"
 )
 
 func TestFileRepository_SaveAndLoad(t *testing.T) {
+	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "storage.json")
 
 	repo, err := NewFileRepository(path)
@@ -13,7 +15,7 @@ func TestFileRepository_SaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	saved, err := repo.SaveIfNotExists("abc123", "https://practicum.yandex.ru")
+	saved, err := repo.SaveIfNotExist(ctx, "abc123", "https://practicum.yandex.ru")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -27,8 +29,8 @@ func TestFileRepository_SaveAndLoad(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok := repo2.GetByID("abc123")
-	if !ok {
+	got, err := repo2.GetById(ctx, "abc123")
+	if err != nil {
 		t.Fatal("expected url to be restored")
 	}
 
