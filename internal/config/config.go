@@ -9,6 +9,7 @@ type Config struct {
 	ServerAddress   string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 func Parse() *Config {
@@ -16,6 +17,7 @@ func Parse() *Config {
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "storage",
+		DatabaseDSN:     "postgres://app:root@localhost:5432/short_url?sslmode=disable",
 	}
 
 	flag.StringVar(
@@ -32,6 +34,8 @@ func Parse() *Config {
 	)
 	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "file storage path")
 
+	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "database DSN")
+
 	flag.Parse()
 
 	if v := os.Getenv("SERVER_ADDRESS"); v != "" {
@@ -44,6 +48,10 @@ func Parse() *Config {
 
 	if v := os.Getenv("FILE_STORAGE_PATH"); v != "" {
 		cfg.FileStoragePath = v
+	}
+
+	if v := os.Getenv("DATABASE_DSN"); v != "" {
+		cfg.DatabaseDSN = v
 	}
 
 	return cfg
