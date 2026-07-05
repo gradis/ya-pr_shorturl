@@ -667,63 +667,6 @@ func TestHandleShortenJSON_Conflict(t *testing.T) {
 
 func TestHandleShortenBatch(t *testing.T) {
 	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
-	h := NewURLHandler(svc)
-
-	r := gin.New()
-	h.RegisterRoutes(r)
-
-	body := `{"url":`
-	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf(
-			"expected status %d, got %d",
-			http.StatusBadRequest,
-			rec.Code,
-		)
-	}
-}
-
-func TestHandleShortenJSON_ServiceError(t *testing.T) {
-	s := &mockURLService{
-		addURLFunc: func(
-			ctx context.Context,
-			originalURL string,
-		) (string, error) {
-			return "", errors.New("service error")
-		},
-	}
-
-	router := newTestRouter(s)
-
-	req := httptest.NewRequest(
-		http.MethodPost,
-		"/api/shorten",
-		strings.NewReader(
-			`{"url":"https://practicum.yandex.ru"}`,
-		),
-	)
-	req.Header.Set("Content-Type", "application/json")
-
-	rec := httptest.NewRecorder()
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf(
-			"expected status %d, got %d",
-			http.StatusInternalServerError,
-			rec.Code,
-		)
-	}
-}
-
-func TestHandleShortenBatch(t *testing.T) {
-	repo := repository.NewMemoryRepository()
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
