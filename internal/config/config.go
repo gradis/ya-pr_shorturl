@@ -49,8 +49,6 @@ func Parse() *Config {
 		"database DSN",
 	)
 
-	flag.StringVar(&cfg.DatabaseDSN, "d", cfg.DatabaseDSN, "database DSN")
-
 	flag.Parse()
 
 	if value, ok := lookupNonEmptyEnv("SERVER_ADDRESS"); ok {
@@ -69,8 +67,8 @@ func Parse() *Config {
 		cfg.DatabaseDSN = value
 	}
 
-	if v := os.Getenv("DATABASE_DSN"); v != "" {
-		cfg.DatabaseDSN = v
+	if value, ok := lookupNonEmptyEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = value
 	}
 
 	return cfg

@@ -5,28 +5,12 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/jackc/pgx"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type PostgresRepository struct {
 	pool *pgxpool.Pool
-}
-
-func InitPostgresSchema(ctx context.Context, pool *pgxpool.Pool) error {
-	const query = `
-CREATE TABLE IF NOT EXISTS urls (
-	id BIGSERIAL PRIMARY KEY,
-	short_url VARCHAR(255) NOT NULL UNIQUE,
-	original_url TEXT NOT NULL,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);`
-
-	if _, err := pool.Exec(ctx, query); err != nil {
-		return fmt.Errorf("create urls table: %w", err)
-	}
-
-	return nil
 }
 
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
