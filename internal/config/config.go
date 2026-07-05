@@ -63,10 +63,6 @@ func Parse() *Config {
 		cfg.FileStoragePath = value
 	}
 
-	if value, ok := lookupNonEmptyEnv("DATABASE_CONN_STRING"); ok {
-		cfg.DatabaseDSN = value
-	}
-
 	if value, ok := lookupNonEmptyEnv("DATABASE_DSN"); ok {
 		cfg.DatabaseDSN = value
 	}
