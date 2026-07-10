@@ -14,30 +14,16 @@ type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
-func InitPostgresSchema(ctx context.Context, pool *pgxpool.Pool) error {
-	const query = `
-CREATE TABLE IF NOT EXISTS urls (
-	id BIGSERIAL PRIMARY KEY,
-	short_url VARCHAR(255) NOT NULL UNIQUE,
-	original_url TEXT NOT NULL,
-	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-);`
-
-	if _, err := pool.Exec(ctx, query); err != nil {
-		return fmt.Errorf("create urls table: %w", err)
-	}
-
-	const indexQuery = `CREATE UNIQUE INDEX IF NOT EXISTS idx_urls_original_url ON urls (original_url);`
-
-	if _, err := pool.Exec(ctx, indexQuery); err != nil {
-		return fmt.Errorf("create original URL index: %w", err)
-	}
-
-	return nil
-}
-
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
+}
+
+func (r *PostgresRepository) Ping(ctx context.Context) error {
+	return r.pool.Ping(ctx)
+}
+
+func (r *PostgresRepository) Close() {
+	r.pool.Close()
 }
 
 func (r *PostgresRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
@@ -80,10 +66,17 @@ RETURNING short_url;`
 		_ = tx.Rollback(ctx)
 	}()
 
+	batch := &pgx.Batch{}
+	for _, record := range records {
+		batch.Queue(query, record.ID, record.OriginalURL)
+	}
+
+	batchResults := tx.SendBatch(ctx, batch)
 	result := make([]URLRecord, 0, len(records))
 	for _, record := range records {
 		var shortURL string
-		if err := tx.QueryRow(ctx, query, record.ID, record.OriginalURL).Scan(&shortURL); err != nil {
+		if err := batchResults.QueryRow().Scan(&shortURL); err != nil {
+			_ = batchResults.Close()
 			if isUniqueViolation(err) {
 				return nil, ErrURLIDConflict
 			}
@@ -97,6 +90,14 @@ RETURNING short_url;`
 		})
 	}
 
+	if err := batchResults.Close(); err != nil {
+		if isUniqueViolation(err) {
+			return nil, ErrURLIDConflict
+		}
+
+		return nil, fmt.Errorf("close batch results: %w", err)
+	}
+
 	if err := tx.Commit(ctx); err != nil {
 		return nil, fmt.Errorf("commit transaction: %w", err)
 	}
@@ -105,12 +106,11 @@ RETURNING short_url;`
 }
 
 func (r *PostgresRepository) GetByID(ctx context.Context, id string) (string, error) {
-	const query = `SELECT short_url, original_url FROM urls WHERE short_url = $1;`
+	const query = `SELECT original_url FROM urls WHERE short_url = $1;`
 
-	var shortURL string
 	var originalURL string
 
-	err := r.pool.QueryRow(ctx, query, id).Scan(&shortURL, &originalURL)
+	err := r.pool.QueryRow(ctx, query, id).Scan(&originalURL)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrURLNotFound
@@ -126,5 +126,3 @@ func isUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
-
-var _ URLRepository = (*PostgresRepository)(nil)

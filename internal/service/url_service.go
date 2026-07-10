@@ -20,8 +20,14 @@ var (
 	ErrURLAlreadyExists = errors.New("URL already exists")
 )
 
+type URLRepository interface {
+	SaveURL(ctx context.Context, id string, originalURL string) (repository.URLSaveResult, error)
+	SaveBatch(ctx context.Context, records []repository.URLRecord) ([]repository.URLRecord, error)
+	GetByID(ctx context.Context, id string) (string, error)
+}
+
 type URLService struct {
-	repo    repository.URLRepository
+	repo    URLRepository
 	baseURL string
 }
 
@@ -35,7 +41,7 @@ type BatchURLResult struct {
 	ShortURL      string
 }
 
-func NewURLService(repo repository.URLRepository, baseURL string) *URLService {
+func NewURLService(repo URLRepository, baseURL string) *URLService {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}

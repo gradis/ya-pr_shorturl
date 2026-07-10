@@ -35,11 +35,11 @@ func main() {
 			zap.Error(err),
 		)
 	}
-	defer storage.close()
+	defer storage.Close()
 
-	urlService := service.NewURLService(storage.repository, cfg.BaseURL)
+	urlService := service.NewURLService(storage, cfg.BaseURL)
 	urlHandler := handler.NewURLHandler(urlService)
-	pingHandler := handler.NewPingHandler(storage.pinger)
+	pingHandler := handler.NewPingHandler(storage)
 
 	router := gin.New()
 

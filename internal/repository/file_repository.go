@@ -39,6 +39,12 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 	return repo, nil
 }
 
+func (r *FileRepository) Ping(context.Context) error {
+	return nil
+}
+
+func (r *FileRepository) Close() {}
+
 func (r *FileRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return URLSaveResult{}, err
@@ -266,5 +272,3 @@ func (r *FileRepository) flush() error {
 
 	return nil
 }
-
-var _ URLRepository = (*FileRepository)(nil)

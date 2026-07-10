@@ -18,6 +18,12 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
+func (r *MemoryRepository) Ping(context.Context) error {
+	return nil
+}
+
+func (r *MemoryRepository) Close() {}
+
 func (r *MemoryRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return URLSaveResult{}, err
@@ -95,5 +101,3 @@ func (r *MemoryRepository) Exists(id string) bool {
 	_, ok := r.urls[id]
 	return ok
 }
-
-var _ URLRepository = (*MemoryRepository)(nil)
