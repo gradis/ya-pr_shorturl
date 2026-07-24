@@ -39,7 +39,7 @@ func main() {
 
 	urlService := service.NewURLService(storage, cfg.BaseURL)
 	urlHandler := handler.NewURLHandler(urlService)
-	pingHandler := handler.NewPingHandler(storage)
+	pingHandler := handler.NewPingHandler(storage, logg)
 
 	router := gin.New()
 
