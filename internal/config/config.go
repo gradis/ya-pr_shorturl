@@ -3,48 +3,78 @@ package config
 import (
 	"flag"
 	"os"
+	"strings"
 )
 
 type Config struct {
 	ServerAddress   string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 func Parse() *Config {
 	cfg := &Config{
 		ServerAddress:   "localhost:8080",
 		BaseURL:         "http://localhost:8080",
-		FileStoragePath: "storage",
+		FileStoragePath: "",
+		DatabaseDSN:     "",
 	}
 
 	flag.StringVar(
 		&cfg.ServerAddress,
 		"a",
 		cfg.ServerAddress,
-		"HTTP server address")
+		"server address",
+	)
 
 	flag.StringVar(
 		&cfg.BaseURL,
 		"b",
 		cfg.BaseURL,
-		"base URL for shortened links",
+		"base URL",
 	)
-	flag.StringVar(&cfg.FileStoragePath, "f", cfg.FileStoragePath, "file storage path")
+
+	flag.StringVar(
+		&cfg.FileStoragePath,
+		"f",
+		cfg.FileStoragePath,
+		"file storage path",
+	)
+
+	flag.StringVar(
+		&cfg.DatabaseDSN,
+		"d",
+		cfg.DatabaseDSN,
+		"database DSN",
+	)
 
 	flag.Parse()
 
-	if v := os.Getenv("SERVER_ADDRESS"); v != "" {
-		cfg.ServerAddress = v
+	if value, ok := lookupNonEmptyEnv("SERVER_ADDRESS"); ok {
+		cfg.ServerAddress = value
 	}
 
-	if v := os.Getenv("BASE_URL"); v != "" {
-		cfg.BaseURL = v
+	if value, ok := lookupNonEmptyEnv("BASE_URL"); ok {
+		cfg.BaseURL = value
 	}
 
-	if v := os.Getenv("FILE_STORAGE_PATH"); v != "" {
-		cfg.FileStoragePath = v
+	if value, ok := lookupNonEmptyEnv("FILE_STORAGE_PATH"); ok {
+		cfg.FileStoragePath = value
+	}
+
+	if value, ok := lookupNonEmptyEnv("DATABASE_DSN"); ok {
+		cfg.DatabaseDSN = value
 	}
 
 	return cfg
+}
+
+func lookupNonEmptyEnv(key string) (string, bool) {
+	value, ok := os.LookupEnv(key)
+	if !ok || strings.TrimSpace(value) == "" {
+		return "", false
+	}
+
+	return value, true
 }

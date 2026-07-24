@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"compress/gzip"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -18,35 +19,64 @@ import (
 )
 
 type mockURLService struct {
-	addURLFunc     func(originalURL string) (string, error)
-	getURLByIDFunc func(id string) (string, error)
+	addURLFunc func(
+		ctx context.Context,
+		originalURL string,
+	) (string, error)
+
+	getURLByIDFunc func(
+		ctx context.Context,
+		id string,
+	) (string, error)
+
+	addBatchURLsFunc func(
+		ctx context.Context,
+		urls []service.BatchURL,
+	) ([]service.BatchURLResult, error)
 }
 
 var _ URLService = (*mockURLService)(nil)
 
-func (m *mockURLService) AddURL(originalURL string) (string, error) {
+func (m *mockURLService) AddURL(
+	ctx context.Context,
+	originalURL string,
+) (string, error) {
 	if m.addURLFunc != nil {
-		return m.addURLFunc(originalURL)
+		return m.addURLFunc(ctx, originalURL)
 	}
 
 	return "", nil
 }
 
-func (m *mockURLService) GetURLByID(id string) (string, error) {
+func (m *mockURLService) GetURLByID(
+	ctx context.Context,
+	id string,
+) (string, error) {
 	if m.getURLByIDFunc != nil {
-		return m.getURLByIDFunc(id)
+		return m.getURLByIDFunc(ctx, id)
 	}
 
 	return "", nil
 }
 
-func newTestRouter(service URLService) *gin.Engine {
+func (m *mockURLService) AddBatchURLs(
+	ctx context.Context,
+	urls []service.BatchURL,
+) ([]service.BatchURLResult, error) {
+	if m.addBatchURLsFunc != nil {
+		return m.addBatchURLsFunc(ctx, urls)
+	}
+
+	return nil, nil
+}
+
+func newTestRouter(s URLService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
 	router.HandleMethodNotAllowed = true
 
-	h := NewURLHandler(service)
+	h := NewURLHandler(s)
 	h.RegisterRoutes(router)
 
 	router.NoRoute(func(c *gin.Context) {
@@ -63,121 +93,276 @@ func newTestRouter(service URLService) *gin.Engine {
 func TestURLHandler_PostSuccess(t *testing.T) {
 	serviceCalled := false
 
-	service := &mockURLService{
-		addURLFunc: func(originalURL string) (string, error) {
+	s := &mockURLService{
+		addURLFunc: func(
+			ctx context.Context,
+			originalURL string,
+		) (string, error) {
 			serviceCalled = true
 
-			if originalURL != "https://example.com" {
-				t.Fatalf("expected originalURL %q, got %q", "https://example.com", originalURL)
+			if ctx == nil {
+				t.Fatal("expected non-nil context")
+			}
+
+			want := "https://example.com"
+			if originalURL != want {
+				t.Fatalf(
+					"expected originalURL %q, got %q",
+					want,
+					originalURL,
+				)
 			}
 
 			return "http://localhost:8080/abc123", nil
 		},
 	}
 
-	router := newTestRouter(service)
+	router := newTestRouter(s)
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("  https://example.com  "))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader("  https://example.com  "),
+	)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusCreated,
+			rec.Code,
+		)
 	}
 
 	if !serviceCalled {
-		t.Fatal("expected service.AddUrl to be called")
+		t.Fatal("expected service.AddURL to be called")
 	}
 
-	if got := rec.Header().Get("Content-Type"); !strings.HasPrefix(got, "text/plain") {
-		t.Fatalf("expected Content-Type text/plain, got %q", got)
+	contentType := rec.Header().Get("Content-Type")
+	if !strings.HasPrefix(contentType, "text/plain") {
+		t.Fatalf(
+			"expected Content-Type text/plain, got %q",
+			contentType,
+		)
 	}
 
-	if got := rec.Body.String(); got != "http://localhost:8080/abc123" {
-		t.Fatalf("expected body %q, got %q", "http://localhost:8080/abc123", got)
+	wantBody := "http://localhost:8080/abc123"
+	if got := rec.Body.String(); got != wantBody {
+		t.Fatalf("expected body %q, got %q", wantBody, got)
 	}
 }
 
 func TestURLHandler_PostBadPath(t *testing.T) {
-	service := &mockURLService{
-		addURLFunc: func(originalURL string) (string, error) {
-			t.Fatal("service.AddUrl should not be called")
+	s := &mockURLService{
+		addURLFunc: func(
+			ctx context.Context,
+			originalURL string,
+		) (string, error) {
+			t.Fatal("service.AddURL should not be called")
 			return "", nil
 		},
 	}
 
-	router := newTestRouter(service)
+	router := newTestRouter(s)
 
-	req := httptest.NewRequest(http.MethodPost, "/abc", strings.NewReader("https://example.com"))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/abc",
+		strings.NewReader("https://example.com"),
+	)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			rec.Code,
+		)
 	}
 }
 
 func TestURLHandler_PostEmptyBody(t *testing.T) {
-	service := &mockURLService{
-		addURLFunc: func(originalURL string) (string, error) {
-			t.Fatal("service.AddUrl should not be called")
+	s := &mockURLService{
+		addURLFunc: func(
+			ctx context.Context,
+			originalURL string,
+		) (string, error) {
+			t.Fatal("service.AddURL should not be called")
 			return "", nil
 		},
 	}
 
-	router := newTestRouter(service)
+	router := newTestRouter(s)
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("   \n\t  "))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader("   \n\t  "),
+	)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			rec.Code,
+		)
 	}
 }
 
 func TestURLHandler_PostServiceError(t *testing.T) {
-	service := &mockURLService{
-		addURLFunc: func(originalURL string) (string, error) {
-			if originalURL != "https://example.com" {
-				t.Fatalf("expected originalURL %q, got %q", "https://example.com", originalURL)
+	s := &mockURLService{
+		addURLFunc: func(
+			ctx context.Context,
+			originalURL string,
+		) (string, error) {
+			want := "https://example.com"
+			if originalURL != want {
+				t.Fatalf(
+					"expected originalURL %q, got %q",
+					want,
+					originalURL,
+				)
 			}
 
 			return "", errors.New("service error")
 		},
 	}
 
-	router := newTestRouter(service)
+	router := newTestRouter(s)
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com"))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader("https://example.com"),
+	)
 	rec := httptest.NewRecorder()
 
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			rec.Code,
+		)
+	}
+}
+
+func TestURLHandler_PostInvalidURL(t *testing.T) {
+	s := &mockURLService{
+		addURLFunc: func(
+			ctx context.Context,
+			originalURL string,
+		) (string, error) {
+			return "", service.ErrInvalidURL
+		},
+	}
+
+	router := newTestRouter(s)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader("invalid-url"),
+	)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			rec.Code,
+		)
+	}
+}
+
+func TestURLHandler_PostConflict(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+	router := newTestRouter(svc)
+
+	body := "https://example.com"
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader(body),
+	)
+	firstRec := httptest.NewRecorder()
+	router.ServeHTTP(firstRec, firstReq)
+
+	if firstRec.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected first status %d, got %d",
+			http.StatusCreated,
+			firstRec.Code,
+		)
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/",
+		strings.NewReader(body),
+	)
+	secondRec := httptest.NewRecorder()
+	router.ServeHTTP(secondRec, secondReq)
+
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected second status %d, got %d",
+			http.StatusConflict,
+			secondRec.Code,
+		)
+	}
+
+	if secondRec.Body.String() != firstRec.Body.String() {
+		t.Fatalf(
+			"expected existing short URL %q, got %q",
+			firstRec.Body.String(),
+			secondRec.Body.String(),
+		)
 	}
 }
 
 func TestURLHandler_GetSuccess(t *testing.T) {
 	serviceCalled := false
 
-	service := &mockURLService{
-		getURLByIDFunc: func(id string) (string, error) {
+	s := &mockURLService{
+		getURLByIDFunc: func(
+			ctx context.Context,
+			id string,
+		) (string, error) {
 			serviceCalled = true
 
+			if ctx == nil {
+				t.Fatal("expected non-nil context")
+			}
+
 			if id != "abc123" {
-				t.Fatalf("expected id %q, got %q", "abc123", id)
+				t.Fatalf(
+					"expected id %q, got %q",
+					"abc123",
+					id,
+				)
 			}
 
 			return "https://example.com", nil
 		},
 	}
 
-	router := newTestRouter(service)
+	router := newTestRouter(s)
 
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -185,27 +370,38 @@ func TestURLHandler_GetSuccess(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusTemporaryRedirect {
-		t.Fatalf("expected status %d, got %d", http.StatusTemporaryRedirect, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusTemporaryRedirect,
+			rec.Code,
+		)
 	}
 
 	if !serviceCalled {
-		t.Fatal("expected service.GetUrlByID to be called")
+		t.Fatal("expected service.GetURLByID to be called")
 	}
 
 	if got := rec.Header().Get("Location"); got != "https://example.com" {
-		t.Fatalf("expected Location %q, got %q", "https://example.com", got)
+		t.Fatalf(
+			"expected Location %q, got %q",
+			"https://example.com",
+			got,
+		)
 	}
 }
 
 func TestURLHandler_GetRootPath(t *testing.T) {
-	service := &mockURLService{
-		getURLByIDFunc: func(id string) (string, error) {
-			t.Fatal("service.GetUrlByID should not be called")
+	s := &mockURLService{
+		getURLByIDFunc: func(
+			ctx context.Context,
+			id string,
+		) (string, error) {
+			t.Fatal("service.GetURLByID should not be called")
 			return "", nil
 		},
 	}
 
-	router := newTestRouter(service)
+	router := newTestRouter(s)
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
@@ -213,22 +409,59 @@ func TestURLHandler_GetRootPath(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			rec.Code,
+		)
+	}
+}
+
+func TestURLHandler_GetNotFound(t *testing.T) {
+	s := &mockURLService{
+		getURLByIDFunc: func(
+			ctx context.Context,
+			id string,
+		) (string, error) {
+			return "", service.ErrURLNotFound
+		},
+	}
+
+	router := newTestRouter(s)
+
+	req := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	rec := httptest.NewRecorder()
+
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusNotFound,
+			rec.Code,
+		)
 	}
 }
 
 func TestURLHandler_GetServiceError(t *testing.T) {
-	service := &mockURLService{
-		getURLByIDFunc: func(id string) (string, error) {
+	s := &mockURLService{
+		getURLByIDFunc: func(
+			ctx context.Context,
+			id string,
+		) (string, error) {
 			if id != "abc123" {
-				t.Fatalf("expected id %q, got %q", "abc123", id)
+				t.Fatalf(
+					"expected id %q, got %q",
+					"abc123",
+					id,
+				)
 			}
 
 			return "", errors.New("service error")
 		},
 	}
 
-	router := newTestRouter(service)
+	router := newTestRouter(s)
 
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -236,14 +469,16 @@ func TestURLHandler_GetServiceError(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			rec.Code,
+		)
 	}
 }
 
 func TestURLHandler_BadMethod(t *testing.T) {
-	service := &mockURLService{}
-
-	router := newTestRouter(service)
+	router := newTestRouter(&mockURLService{})
 
 	req := httptest.NewRequest(http.MethodPut, "/", nil)
 	rec := httptest.NewRecorder()
@@ -251,157 +486,367 @@ func TestURLHandler_BadMethod(t *testing.T) {
 	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			rec.Code,
+		)
 	}
 }
 
 func TestHandleShortenJSON(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-
 	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
-	h := NewURLHandler(svc)
-
-	r := gin.New()
-	h.RegisterRoutes(r)
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+	router := newTestRouter(svc)
 
 	body := `{"url":"https://practicum.yandex.ru"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(body),
+	)
 	req.Header.Set("Content-Type", "application/json")
 
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusCreated,
+			rec.Code,
+		)
 	}
 
 	contentType := rec.Header().Get("Content-Type")
 	if !strings.Contains(contentType, "application/json") {
-		t.Fatalf("expected Content-Type application/json, got %q", contentType)
+		t.Fatalf(
+			"expected Content-Type application/json, got %q",
+			contentType,
+		)
 	}
 
-	var resp struct {
-		Result string `json:"result"`
-	}
-
-	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+	var response shortenResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
-	if resp.Result == "" {
+	if response.Result == "" {
 		t.Fatal("expected non-empty result")
 	}
 
-	if !strings.HasPrefix(resp.Result, "http://localhost:8080/") {
-		t.Fatalf("unexpected short url: %q", resp.Result)
+	if !strings.HasPrefix(
+		response.Result,
+		"http://localhost:8080/",
+	) {
+		t.Fatalf("unexpected short URL: %q", response.Result)
 	}
 }
 
 func TestHandleShortenJSON_BadRequest(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	router := newTestRouter(&mockURLService{})
 
-	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
-	h := NewURLHandler(svc)
-
-	r := gin.New()
-	h.RegisterRoutes(r)
-
-	body := `{"url":`
-	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(`{"url":`),
+	)
 	req.Header.Set("Content-Type", "application/json")
 
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			rec.Code,
+		)
+	}
+}
+
+func TestHandleShortenJSON_ServiceError(t *testing.T) {
+	s := &mockURLService{
+		addURLFunc: func(
+			ctx context.Context,
+			originalURL string,
+		) (string, error) {
+			return "", errors.New("service error")
+		},
+	}
+
+	router := newTestRouter(s)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(
+			`{"url":"https://practicum.yandex.ru"}`,
+		),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			rec.Code,
+		)
+	}
+}
+
+func TestHandleShortenJSON_Conflict(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+	router := newTestRouter(svc)
+
+	body := `{"url":"https://practicum.yandex.ru"}`
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(body),
+	)
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	router.ServeHTTP(firstRec, firstReq)
+
+	if firstRec.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected first status %d, got %d",
+			http.StatusCreated,
+			firstRec.Code,
+		)
+	}
+
+	var firstResponse shortenResponse
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstResponse); err != nil {
+		t.Fatalf("failed to unmarshal first response: %v", err)
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(body),
+	)
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	router.ServeHTTP(secondRec, secondReq)
+
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf(
+			"expected second status %d, got %d",
+			http.StatusConflict,
+			secondRec.Code,
+		)
+	}
+
+	var secondResponse shortenResponse
+	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondResponse); err != nil {
+		t.Fatalf("failed to unmarshal second response: %v", err)
+	}
+
+	if secondResponse.Result != firstResponse.Result {
+		t.Fatalf(
+			"expected existing short URL %q, got %q",
+			firstResponse.Result,
+			secondResponse.Result,
+		)
+	}
+}
+
+func TestHandleShortenBatch(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+	router := newTestRouter(svc)
+
+	body := `[
+		{"correlation_id":"first","original_url":"https://practicum.yandex.ru"},
+		{"correlation_id":"second","original_url":"https://example.com"}
+	]`
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten/batch",
+		strings.NewReader(body),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusCreated,
+			rec.Code,
+		)
+	}
+
+	var response []batchShortenResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+
+	if len(response) != 2 {
+		t.Fatalf("expected 2 response items, got %d", len(response))
+	}
+
+	if response[0].CorrelationID != "first" {
+		t.Fatalf(
+			"expected first correlation_id, got %q",
+			response[0].CorrelationID,
+		)
+	}
+
+	for _, item := range response {
+		if !strings.HasPrefix(item.ShortURL, "http://localhost:8080/") {
+			t.Fatalf("unexpected short URL: %q", item.ShortURL)
+		}
+	}
+}
+
+func TestHandleShortenBatch_Empty(t *testing.T) {
+	router := newTestRouter(&mockURLService{})
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten/batch",
+		strings.NewReader(`[]`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			rec.Code,
+		)
 	}
 }
 
 func TestGzipResponse(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+
 	gin.SetMode(gin.TestMode)
 
-	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	router := gin.New()
+	router.Use(middleware.Gzip())
+
 	h := NewURLHandler(svc)
+	h.RegisterRoutes(router)
 
-	r := gin.New()
-	r.Use(middleware.Gzip())
-	h.RegisterRoutes(r)
-
-	reqBody := `{"url":"https://practicum.yandex.ru"}`
-	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(reqBody))
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(
+			`{"url":"https://practicum.yandex.ru"}`,
+		),
+	)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusCreated,
+			rec.Code,
+		)
 	}
 
-	if rec.Header().Get("Content-Encoding") != "gzip" {
-		t.Fatalf("expected gzip encoding, got %q", rec.Header().Get("Content-Encoding"))
+	if got := rec.Header().Get("Content-Encoding"); got != "gzip" {
+		t.Fatalf("expected gzip encoding, got %q", got)
 	}
 
-	gzReader, err := gzip.NewReader(rec.Body)
+	gzipReader, err := gzip.NewReader(rec.Body)
 	if err != nil {
 		t.Fatalf("failed to create gzip reader: %v", err)
 	}
-	defer gzReader.Close()
+	defer gzipReader.Close()
 
-	body, err := io.ReadAll(gzReader)
+	body, err := io.ReadAll(gzipReader)
 	if err != nil {
 		t.Fatalf("failed to read gzip response: %v", err)
 	}
 
-	var resp struct {
-		Result string `json:"result"`
-	}
-
-	if err := json.Unmarshal(body, &resp); err != nil {
+	var response shortenResponse
+	if err := json.Unmarshal(body, &response); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 
-	if resp.Result == "" {
+	if response.Result == "" {
 		t.Fatal("expected non-empty result")
 	}
 }
 
 func TestGzipRequest(t *testing.T) {
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(
+		repo,
+		"http://localhost:8080",
+	)
+
 	gin.SetMode(gin.TestMode)
 
-	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	router := gin.New()
+	router.Use(middleware.Gzip())
+
 	h := NewURLHandler(svc)
+	h.RegisterRoutes(router)
 
-	r := gin.New()
-	r.Use(middleware.Gzip())
-	h.RegisterRoutes(r)
+	var buffer bytes.Buffer
 
-	var buf bytes.Buffer
+	gzipWriter := gzip.NewWriter(&buffer)
 
-	gzWriter := gzip.NewWriter(&buf)
-	_, err := gzWriter.Write([]byte(`{"url":"https://practicum.yandex.ru"}`))
-	if err != nil {
+	if _, err := gzipWriter.Write(
+		[]byte(`{"url":"https://practicum.yandex.ru"}`),
+	); err != nil {
 		t.Fatalf("failed to write gzip body: %v", err)
 	}
 
-	if err := gzWriter.Close(); err != nil {
+	if err := gzipWriter.Close(); err != nil {
 		t.Fatalf("failed to close gzip writer: %v", err)
 	}
 
-	req := httptest.NewRequest(http.MethodPost, "/api/shorten", &buf)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		&buffer,
+	)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Content-Encoding", "gzip")
 
 	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
+	router.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusCreated,
+			rec.Code,
+		)
 	}
 }

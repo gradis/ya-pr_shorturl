@@ -1,29 +1,44 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
 	"math/big"
 	"net/url"
 	"strings"
+
+	"github.com/gradis/ya-pr_shorturl/internal/repository"
 )
 
 const defaultBaseURL = "http://localhost:8080"
 
 var (
-	ErrURLNotFound = errors.New("url not found")
-	ErrInvalidURL  = errors.New("invalid URL")
+	ErrURLNotFound      = errors.New("url not found")
+	ErrInvalidURL       = errors.New("invalid URL")
+	ErrURLAlreadyExists = errors.New("URL already exists")
 )
 
 type URLRepository interface {
-	SaveIfNotExists(id string, originalURL string) (bool, error)
-	GetByID(id string) (string, bool)
+	SaveURL(ctx context.Context, id string, originalURL string) (repository.URLSaveResult, error)
+	SaveBatch(ctx context.Context, records []repository.URLRecord) ([]repository.URLRecord, error)
+	GetByID(ctx context.Context, id string) (string, error)
 }
 
 type URLService struct {
 	repo    URLRepository
 	baseURL string
+}
+
+type BatchURL struct {
+	CorrelationID string
+	OriginalURL   string
+}
+
+type BatchURLResult struct {
+	CorrelationID string
+	ShortURL      string
 }
 
 func NewURLService(repo URLRepository, baseURL string) *URLService {
@@ -39,50 +54,95 @@ func NewURLService(repo URLRepository, baseURL string) *URLService {
 	}
 }
 
-func (s *URLService) AddURL(originalURL string) (string, error) {
+func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, error) {
 	if !isValidURL(originalURL) {
 		return "", ErrInvalidURL
 	}
 
-	id, err := s.saveWithUniqueID(originalURL)
+	id, duplicate, err := s.saveWithUniqueID(ctx, originalURL)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("save shortened URL: %w", err)
 	}
 
 	shortURL := fmt.Sprintf("%s/%s", s.baseURL, id)
+	if duplicate {
+		return shortURL, ErrURLAlreadyExists
+	}
 
 	return shortURL, nil
 }
 
-func (s *URLService) GetURLByID(id string) (string, error) {
-	originalURL, ok := s.repo.GetByID(id)
-	if !ok {
-		return "", ErrURLNotFound
+func (s *URLService) AddBatchURLs(ctx context.Context, urls []BatchURL) ([]BatchURLResult, error) {
+	records := make([]repository.URLRecord, 0, len(urls))
+	results := make([]BatchURLResult, 0, len(urls))
+
+	for _, item := range urls {
+		if !isValidURL(item.OriginalURL) {
+			return nil, ErrInvalidURL
+		}
+
+		id, err := generateID(8)
+		if err != nil {
+			return nil, err
+		}
+
+		records = append(records, repository.URLRecord{
+			ID:          id,
+			OriginalURL: item.OriginalURL,
+		})
+
+		results = append(results, BatchURLResult{
+			CorrelationID: item.CorrelationID,
+			ShortURL:      fmt.Sprintf("%s/%s", s.baseURL, id),
+		})
 	}
 
-	return originalURL, nil
+	savedRecords, err := s.repo.SaveBatch(ctx, records)
+	if err != nil {
+		return nil, fmt.Errorf("save shortened URL batch: %w", err)
+	}
+
+	for i, record := range savedRecords {
+		results[i].ShortURL = fmt.Sprintf("%s/%s", s.baseURL, record.ID)
+	}
+
+	return results, nil
 }
 
-func (s *URLService) saveWithUniqueID(originalURL string) (string, error) {
+func (s *URLService) saveWithUniqueID(ctx context.Context, originalURL string) (string, bool, error) {
 	const maxAttempts = 10
 
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		id, err := generateID(8)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 
-		saved, err := s.repo.SaveIfNotExists(id, originalURL)
+		result, err := s.repo.SaveURL(ctx, id, originalURL)
 		if err != nil {
-			return "", err
+			if errors.Is(err, repository.ErrURLIDConflict) {
+				continue
+			}
+
+			return "", false, fmt.Errorf("save URL: %w", err)
 		}
 
-		if saved {
-			return id, nil
-		}
+		return result.ID, result.Duplicate, nil
 	}
 
-	return "", fmt.Errorf("failed to generate unique id after %d attempts", maxAttempts)
+	return "", false, fmt.Errorf("failed to generate unique id after %d attempts", maxAttempts)
+}
+
+func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) {
+	originalURL, err := s.repo.GetByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, repository.ErrURLNotFound) {
+			return "", ErrURLNotFound
+		}
+		return "", fmt.Errorf("get URL by ID: %w", err)
+	}
+
+	return originalURL, nil
 }
 
 func generateID(length int) (string, error) {
