@@ -3,17 +3,19 @@ package repository
 import (
 	"context"
 	"sync"
+
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 )
 
 type MemoryRepository struct {
 	mu          sync.RWMutex
-	urls        map[string]string
+	urls        map[string]URLRecord
 	originalIDs map[string]string
 }
 
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
-		urls:        make(map[string]string),
+		urls:        make(map[string]URLRecord),
 		originalIDs: make(map[string]string),
 	}
 }
@@ -43,7 +45,12 @@ func (r *MemoryRepository) SaveURL(ctx context.Context, id string, originalURL s
 		return URLSaveResult{}, ErrURLIDConflict
 	}
 
-	r.urls[id] = originalURL
+	userID, _ := auth.UserIDFromContext(ctx)
+	r.urls[id] = URLRecord{
+		ID:          id,
+		OriginalURL: originalURL,
+		UserID:      userID,
+	}
 	r.originalIDs[originalURL] = id
 
 	return URLSaveResult{ID: id}, nil
@@ -71,7 +78,10 @@ func (r *MemoryRepository) SaveBatch(ctx context.Context, records []URLRecord) (
 			return nil, ErrURLIDConflict
 		}
 
-		r.urls[record.ID] = record.OriginalURL
+		if record.UserID == "" {
+			record.UserID, _ = auth.UserIDFromContext(ctx)
+		}
+		r.urls[record.ID] = record
 		r.originalIDs[record.OriginalURL] = record.ID
 		result = append(result, record)
 	}
@@ -87,11 +97,29 @@ func (r *MemoryRepository) GetByID(ctx context.Context, id string) (string, erro
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	originalURL, exists := r.urls[id]
+	record, exists := r.urls[id]
 	if !exists {
 		return "", ErrURLNotFound
 	}
-	return originalURL, nil
+	return record.OriginalURL, nil
+}
+
+func (r *MemoryRepository) GetByUserID(ctx context.Context, userID string) ([]URLRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	records := make([]URLRecord, 0)
+	for _, record := range r.urls {
+		if record.UserID == userID {
+			records = append(records, record)
+		}
+	}
+
+	return records, nil
 }
 
 func (r *MemoryRepository) Exists(id string) bool {

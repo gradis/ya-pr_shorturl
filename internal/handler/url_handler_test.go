@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/middleware"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
@@ -33,6 +34,10 @@ type mockURLService struct {
 		ctx context.Context,
 		urls []service.BatchURL,
 	) ([]service.BatchURLResult, error)
+
+	getUserURLsFunc func(
+		ctx context.Context,
+	) ([]service.UserURL, error)
 }
 
 var _ URLService = (*mockURLService)(nil)
@@ -65,6 +70,16 @@ func (m *mockURLService) AddBatchURLs(
 ) ([]service.BatchURLResult, error) {
 	if m.addBatchURLsFunc != nil {
 		return m.addBatchURLsFunc(ctx, urls)
+	}
+
+	return nil, nil
+}
+
+func (m *mockURLService) GetUserURLs(
+	ctx context.Context,
+) ([]service.UserURL, error) {
+	if m.getUserURLsFunc != nil {
+		return m.getUserURLsFunc(ctx)
 	}
 
 	return nil, nil
@@ -738,6 +753,152 @@ func TestHandleShortenBatch_Empty(t *testing.T) {
 			http.StatusBadRequest,
 			rec.Code,
 		)
+	}
+}
+
+func TestHandleUserURLs_Unauthorized(t *testing.T) {
+	router := newTestRouter(&mockURLService{})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	request.AddCookie(&http.Cookie{
+		Name:  auth.CookieName,
+		Value: "cookie-without-authenticated-user",
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			response.Code,
+		)
+	}
+}
+
+func TestHandleUserURLs_InvalidCookieIsReplacedAndUnauthorized(t *testing.T) {
+	const secret = "test-signing-secret"
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080")
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Authentication(secret))
+	NewURLHandler(svc).RegisterRoutes(router)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	request.AddCookie(&http.Cookie{
+		Name:  auth.CookieName,
+		Value: "forged-token",
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			response.Code,
+		)
+	}
+
+	cookies := response.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected a replacement cookie, got %d", len(cookies))
+	}
+	if _, err := auth.Verify(cookies[0].Value, []byte(secret)); err != nil {
+		t.Fatalf("expected a valid replacement cookie: %v", err)
+	}
+}
+
+func TestHandleUserURLs_ReturnsOnlyAuthenticatedUserURLs(t *testing.T) {
+	const secret = "test-signing-secret"
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080")
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Authentication(secret))
+	NewURLHandler(svc).RegisterRoutes(router)
+
+	createRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(`{"url":"https://example.com/user-one"}`),
+	)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse := httptest.NewRecorder()
+	router.ServeHTTP(createResponse, createRequest)
+
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createResponse.Code)
+	}
+
+	cookies := createResponse.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected authentication cookie, got %d cookies", len(cookies))
+	}
+
+	otherUserRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(`{"url":"https://example.com/user-two"}`),
+	)
+	otherUserRequest.Header.Set("Content-Type", "application/json")
+	otherUserResponse := httptest.NewRecorder()
+	router.ServeHTTP(otherUserResponse, otherUserRequest)
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	listRequest.AddCookie(cookies[0])
+	listResponse := httptest.NewRecorder()
+	router.ServeHTTP(listResponse, listRequest)
+
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listResponse.Code)
+	}
+
+	var response []userURLResponse
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(response) != 1 {
+		t.Fatalf("expected one user URL, got %d", len(response))
+	}
+	if response[0].OriginalURL != "https://example.com/user-one" {
+		t.Fatalf("unexpected original URL %q", response[0].OriginalURL)
+	}
+	if !strings.HasPrefix(response[0].ShortURL, "http://localhost:8080/") {
+		t.Fatalf("unexpected short URL %q", response[0].ShortURL)
+	}
+}
+
+func TestHandleUserURLs_NoContent(t *testing.T) {
+	const secret = "test-signing-secret"
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080")
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Authentication(secret))
+	NewURLHandler(svc).RegisterRoutes(router)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusNoContent,
+			response.Code,
+		)
+	}
+	if response.Body.Len() != 0 {
+		t.Fatalf("expected empty response body, got %q", response.Body.String())
 	}
 }
 
