@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 )
 
@@ -14,6 +15,7 @@ type URLService interface {
 	AddURL(ctx context.Context, originalURL string) (string, error)
 	AddBatchURLs(ctx context.Context, urls []service.BatchURL) ([]service.BatchURLResult, error)
 	GetURLByID(ctx context.Context, id string) (string, error)
+	GetUserURLs(ctx context.Context) ([]service.UserURL, error)
 }
 
 type URLHandler struct {
@@ -44,11 +46,55 @@ type batchShortenResponse struct {
 	ShortURL      string `json:"short_url"`
 }
 
+type userURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
 func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
 	router.POST("/", h.handlePost)
 	router.GET("/:id", h.handleGet)
 	router.POST("/api/shorten", h.handleShortenJSON)
 	router.POST("/api/shorten/batch", h.handleShortenBatch)
+	router.GET("/api/user/urls", h.handleUserURLs)
+}
+
+func (h *URLHandler) handleUserURLs(c *gin.Context) {
+	if auth.HasInvalidCookie(c.Request.Context()) {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+
+	if _, ok := auth.UserIDFromContext(c.Request.Context()); !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+
+	urls, err := h.service.GetUserURLs(c.Request.Context())
+	if err != nil {
+		if errors.Is(err, service.ErrUnauthorized) {
+			c.Status(http.StatusUnauthorized)
+			return
+		}
+
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		return
+	}
+
+	if len(urls) == 0 {
+		c.Status(http.StatusNoContent)
+		return
+	}
+
+	response := make([]userURLResponse, 0, len(urls))
+	for _, item := range urls {
+		response = append(response, userURLResponse{
+			ShortURL:    item.ShortURL,
+			OriginalURL: item.OriginalURL,
+		})
+	}
+
+	c.JSON(http.StatusOK, response)
 }
 
 func (h *URLHandler) handlePost(c *gin.Context) {

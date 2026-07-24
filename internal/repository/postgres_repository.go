@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -28,15 +29,16 @@ func (r *PostgresRepository) Close() {
 
 func (r *PostgresRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
 	const query = `
-INSERT INTO urls (short_url, original_url)
-VALUES ($1, $2)
+INSERT INTO urls (short_url, original_url, user_id)
+VALUES ($1, $2, $3)
 ON CONFLICT (original_url) DO UPDATE SET original_url = EXCLUDED.original_url
 RETURNING short_url, (xmax = 0) AS inserted;`
 
 	var shortURL string
 	var inserted bool
+	userID, _ := auth.UserIDFromContext(ctx)
 
-	if err := r.pool.QueryRow(ctx, query, id, originalURL).Scan(&shortURL, &inserted); err != nil {
+	if err := r.pool.QueryRow(ctx, query, id, originalURL, userID).Scan(&shortURL, &inserted); err != nil {
 		if isUniqueViolation(err) {
 			return URLSaveResult{}, ErrURLIDConflict
 		}
@@ -52,8 +54,8 @@ RETURNING short_url, (xmax = 0) AS inserted;`
 
 func (r *PostgresRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]URLRecord, error) {
 	const query = `
-INSERT INTO urls (short_url, original_url)
-VALUES ($1, $2)
+INSERT INTO urls (short_url, original_url, user_id)
+VALUES ($1, $2, $3)
 ON CONFLICT (original_url) DO UPDATE SET original_url = EXCLUDED.original_url
 RETURNING short_url;`
 
@@ -67,8 +69,13 @@ RETURNING short_url;`
 	}()
 
 	batch := &pgx.Batch{}
+	userID, _ := auth.UserIDFromContext(ctx)
 	for _, record := range records {
-		batch.Queue(query, record.ID, record.OriginalURL)
+		recordUserID := record.UserID
+		if recordUserID == "" {
+			recordUserID = userID
+		}
+		batch.Queue(query, record.ID, record.OriginalURL, recordUserID)
 	}
 
 	batchResults := tx.SendBatch(ctx, batch)
@@ -87,6 +94,7 @@ RETURNING short_url;`
 		result = append(result, URLRecord{
 			ID:          shortURL,
 			OriginalURL: record.OriginalURL,
+			UserID:      userID,
 		})
 	}
 
@@ -103,6 +111,35 @@ RETURNING short_url;`
 	}
 
 	return result, nil
+}
+
+func (r *PostgresRepository) GetByUserID(ctx context.Context, userID string) ([]URLRecord, error) {
+	const query = `
+SELECT short_url, original_url, user_id
+FROM urls
+WHERE user_id = $1
+ORDER BY id;`
+
+	rows, err := r.pool.Query(ctx, query, userID)
+	if err != nil {
+		return nil, fmt.Errorf("select user URLs: %w", err)
+	}
+	defer rows.Close()
+
+	records := make([]URLRecord, 0)
+	for rows.Next() {
+		var record URLRecord
+		if err := rows.Scan(&record.ID, &record.OriginalURL, &record.UserID); err != nil {
+			return nil, fmt.Errorf("scan user URL: %w", err)
+		}
+		records = append(records, record)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate user URLs: %w", err)
+	}
+
+	return records, nil
 }
 
 func (r *PostgresRepository) GetByID(ctx context.Context, id string) (string, error) {

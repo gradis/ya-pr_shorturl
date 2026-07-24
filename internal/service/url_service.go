@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 )
 
@@ -18,12 +19,17 @@ var (
 	ErrURLNotFound      = errors.New("url not found")
 	ErrInvalidURL       = errors.New("invalid URL")
 	ErrURLAlreadyExists = errors.New("URL already exists")
+	ErrUnauthorized     = errors.New("user is not authenticated")
 )
 
 type URLRepository interface {
 	SaveURL(ctx context.Context, id string, originalURL string) (repository.URLSaveResult, error)
 	SaveBatch(ctx context.Context, records []repository.URLRecord) ([]repository.URLRecord, error)
 	GetByID(ctx context.Context, id string) (string, error)
+}
+
+type UserURLRepository interface {
+	GetByUserID(ctx context.Context, userID string) ([]repository.URLRecord, error)
 }
 
 type URLService struct {
@@ -39,6 +45,11 @@ type BatchURL struct {
 type BatchURLResult struct {
 	CorrelationID string
 	ShortURL      string
+}
+
+type UserURL struct {
+	ShortURL    string
+	OriginalURL string
 }
 
 func NewURLService(repo URLRepository, baseURL string) *URLService {
@@ -143,6 +154,33 @@ func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) 
 	}
 
 	return originalURL, nil
+}
+
+func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return nil, ErrUnauthorized
+	}
+
+	userRepo, ok := s.repo.(UserURLRepository)
+	if !ok {
+		return nil, errors.New("repository does not support user URLs")
+	}
+
+	records, err := userRepo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user URLs: %w", err)
+	}
+
+	urls := make([]UserURL, 0, len(records))
+	for _, record := range records {
+		urls = append(urls, UserURL{
+			ShortURL:    fmt.Sprintf("%s/%s", s.baseURL, record.ID),
+			OriginalURL: record.OriginalURL,
+		})
+	}
+
+	return urls, nil
 }
 
 func generateID(length int) (string, error) {

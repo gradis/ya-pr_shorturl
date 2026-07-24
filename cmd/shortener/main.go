@@ -46,6 +46,7 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(logg))
 	router.Use(middleware.Gzip())
+	router.Use(middleware.Authentication(cfg.AuthSecret))
 
 	router.HandleMethodNotAllowed = true
 
