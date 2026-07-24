@@ -1,0 +1,274 @@
+package repository
+
+import (
+	"bufio"
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"os"
+	"path/filepath"
+	"strconv"
+	"sync"
+)
+
+type FileRepository struct {
+	mu          sync.RWMutex
+	filePath    string
+	urls        map[string]string
+	originalIDs map[string]string
+}
+
+type FileRecord struct {
+	UUID        string `json:"uuid"`
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
+func NewFileRepository(filePath string) (*FileRepository, error) {
+	repo := &FileRepository{
+		filePath:    filePath,
+		urls:        make(map[string]string),
+		originalIDs: make(map[string]string),
+	}
+
+	if err := repo.load(); err != nil {
+		return nil, err
+	}
+
+	return repo, nil
+}
+
+func (r *FileRepository) Ping(context.Context) error {
+	return nil
+}
+
+func (r *FileRepository) Close() {}
+
+func (r *FileRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
+	if err := ctx.Err(); err != nil {
+		return URLSaveResult{}, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	if existingID, exists := r.originalIDs[originalURL]; exists {
+		return URLSaveResult{
+			ID:        existingID,
+			Duplicate: true,
+		}, nil
+	}
+
+	if _, exists := r.urls[id]; exists {
+		return URLSaveResult{}, ErrURLIDConflict
+	}
+
+	r.urls[id] = originalURL
+	r.originalIDs[originalURL] = id
+
+	if err := r.flush(); err != nil {
+		delete(r.urls, id)
+		delete(r.originalIDs, originalURL)
+		return URLSaveResult{}, err
+	}
+
+	return URLSaveResult{ID: id}, nil
+}
+
+func (r *FileRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]URLRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	result := make([]URLRecord, 0, len(records))
+	urlsRollback := make(map[string]string, len(records))
+	originalIDsRollback := make(map[string]string, len(records))
+
+	for _, record := range records {
+		if existingID, exists := r.originalIDs[record.OriginalURL]; exists {
+			result = append(result, URLRecord{
+				ID:          existingID,
+				OriginalURL: record.OriginalURL,
+			})
+			continue
+		}
+
+		if current, exists := r.urls[record.ID]; exists {
+			urlsRollback[record.ID] = current
+			return nil, ErrURLIDConflict
+		}
+
+		r.urls[record.ID] = record.OriginalURL
+		r.originalIDs[record.OriginalURL] = record.ID
+		originalIDsRollback[record.OriginalURL] = ""
+		result = append(result, record)
+	}
+
+	if err := r.flush(); err != nil {
+		for _, record := range records {
+			if previous, exists := urlsRollback[record.ID]; exists {
+				r.urls[record.ID] = previous
+				continue
+			}
+
+			delete(r.urls, record.ID)
+
+			if _, exists := originalIDsRollback[record.OriginalURL]; exists {
+				delete(r.originalIDs, record.OriginalURL)
+			}
+		}
+
+		return nil, err
+	}
+
+	return result, nil
+}
+
+func (r *FileRepository) GetByID(ctx context.Context, id string) (string, error) {
+	if err := ctx.Err(); err != nil {
+		return "", err
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	originalURL, exists := r.urls[id]
+	if !exists {
+		return "", ErrURLNotFound
+	}
+
+	return originalURL, nil
+}
+
+func (r *FileRepository) Exists(id string) bool {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	_, ok := r.urls[id]
+	return ok
+}
+
+func (r *FileRepository) load() error {
+	if r.filePath == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(r.filePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+
+		return err
+	}
+
+	if len(data) == 0 {
+		return nil
+	}
+
+	if bytes.HasPrefix(bytes.TrimSpace(data), []byte("[")) {
+		return r.loadJSONRecords(data)
+	}
+
+	scanner := bufio.NewScanner(bytes.NewReader(data))
+	for scanner.Scan() {
+		line := bytes.TrimSpace(scanner.Bytes())
+		if len(line) == 0 {
+			continue
+		}
+
+		var record FileRecord
+		if err := json.Unmarshal(line, &record); err != nil {
+			return err
+		}
+
+		r.urls[record.ShortURL] = record.OriginalURL
+		r.originalIDs[record.OriginalURL] = record.ShortURL
+	}
+
+	return scanner.Err()
+}
+
+func (r *FileRepository) loadJSONRecords(data []byte) error {
+	var records []FileRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return err
+	}
+
+	for _, record := range records {
+		r.urls[record.ShortURL] = record.OriginalURL
+		r.originalIDs[record.OriginalURL] = record.ShortURL
+	}
+
+	return nil
+}
+
+func (r *FileRepository) flush() error {
+	if r.filePath == "" {
+		return nil
+	}
+
+	dir := filepath.Dir(r.filePath)
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return err
+	}
+
+	records := make([]FileRecord, 0, len(r.urls))
+
+	i := 1
+	for shortID, originalURL := range r.urls {
+		records = append(records, FileRecord{
+			UUID:        strconv.Itoa(i),
+			ShortURL:    shortID,
+			OriginalURL: originalURL,
+		})
+		i++
+	}
+
+	var buffer bytes.Buffer
+	encoder := json.NewEncoder(&buffer)
+
+	for _, record := range records {
+		if err := encoder.Encode(record); err != nil {
+			return err
+		}
+	}
+
+	tempFile, err := os.CreateTemp(dir, ".url-storage-*.tmp")
+	if err != nil {
+		return err
+	}
+
+	tempPath := tempFile.Name()
+
+	defer func() {
+		_ = tempFile.Close()
+		_ = os.Remove(tempPath)
+	}()
+
+	if err := tempFile.Chmod(0644); err != nil {
+		return err
+	}
+
+	if _, err := tempFile.Write(buffer.Bytes()); err != nil {
+		return err
+	}
+
+	if err := tempFile.Sync(); err != nil {
+		return err
+	}
+
+	if err := tempFile.Close(); err != nil {
+		return err
+	}
+
+	if err := os.Rename(tempPath, r.filePath); err != nil {
+		return err
+	}
+
+	return nil
+}
