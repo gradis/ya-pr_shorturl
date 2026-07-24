@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 )
 
 type DatabasePinger interface {
@@ -13,11 +14,12 @@ type DatabasePinger interface {
 }
 
 type PingHandler struct {
-	db DatabasePinger
+	db  DatabasePinger
+	log *zap.Logger
 }
 
-func NewPingHandler(db DatabasePinger) *PingHandler {
-	return &PingHandler{db: db}
+func NewPingHandler(db DatabasePinger, log *zap.Logger) *PingHandler {
+	return &PingHandler{db: db, log: log}
 }
 
 func (h *PingHandler) RegisterRoutes(router gin.IRouter) {
@@ -26,6 +28,7 @@ func (h *PingHandler) RegisterRoutes(router gin.IRouter) {
 
 func (h *PingHandler) handlePing(c *gin.Context) {
 	if h.db == nil {
+		h.log.Error("database ping failed", zap.String("reason", "db pinger is not configured"))
 		c.Status(http.StatusInternalServerError)
 		return
 	}
@@ -34,6 +37,10 @@ func (h *PingHandler) handlePing(c *gin.Context) {
 	defer cancel()
 
 	if err := h.db.Ping(ctx); err != nil {
+		h.log.Error("database ping failed",
+			zap.Error(err),
+		)
+
 		c.Status(http.StatusInternalServerError)
 		return
 	}
