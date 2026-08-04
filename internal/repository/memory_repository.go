@@ -101,6 +101,11 @@ func (r *MemoryRepository) GetByID(ctx context.Context, id string) (string, erro
 	if !exists {
 		return "", ErrURLNotFound
 	}
+
+	if record.IsDeleted {
+		return "", ErrURLDeleted
+	}
+
 	return record.OriginalURL, nil
 }
 
@@ -120,6 +125,31 @@ func (r *MemoryRepository) GetByUserID(ctx context.Context, userID string) ([]UR
 	}
 
 	return records, nil
+}
+
+func (r *MemoryRepository) DeleteBatch(ctx context.Context, records []URLDeleteRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, deleteRecord := range records {
+		record, exists := r.urls[deleteRecord.ID]
+		if !exists {
+			continue
+		}
+
+		if record.UserID != deleteRecord.UserID {
+			continue
+		}
+
+		record.IsDeleted = true
+		r.urls[deleteRecord.ID] = record
+	}
+
+	return nil
 }
 
 func (r *MemoryRepository) Exists(id string) bool {

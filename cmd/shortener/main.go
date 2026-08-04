@@ -37,7 +37,9 @@ func main() {
 	}
 	defer storage.Close()
 
-	urlService := service.NewURLService(storage, cfg.BaseURL)
+	urlService := service.NewURLServiceWithLogger(storage, cfg.BaseURL, logg)
+	defer urlService.Close()
+
 	urlHandler := handler.NewURLHandler(urlService)
 	pingHandler := handler.NewPingHandler(storage, logg)
 

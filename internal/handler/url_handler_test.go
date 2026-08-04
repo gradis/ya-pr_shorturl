@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -38,6 +39,11 @@ type mockURLService struct {
 	getUserURLsFunc func(
 		ctx context.Context,
 	) ([]service.UserURL, error)
+
+	deleteUserURLsFunc func(
+		ctx context.Context,
+		ids []string,
+	) error
 }
 
 var _ URLService = (*mockURLService)(nil)
@@ -85,6 +91,17 @@ func (m *mockURLService) GetUserURLs(
 	return nil, nil
 }
 
+func (m *mockURLService) DeleteUserURLs(
+	ctx context.Context,
+	ids []string,
+) error {
+	if m.deleteUserURLsFunc != nil {
+		return m.deleteUserURLsFunc(ctx, ids)
+	}
+
+	return nil
+}
+
 func newTestRouter(s URLService) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
@@ -101,6 +118,30 @@ func newTestRouter(s URLService) *gin.Engine {
 	router.NoMethod(func(c *gin.Context) {
 		c.String(http.StatusBadRequest, "bad request")
 	})
+
+	return router
+}
+
+func newAuthenticatedTestRouter(
+	s URLService,
+	userID string,
+) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.Use(func(c *gin.Context) {
+		ctx := auth.WithUserID(
+			c.Request.Context(),
+			userID,
+		)
+
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+
+	h := NewURLHandler(s)
+	h.RegisterRoutes(router)
 
 	return router
 }
@@ -1008,6 +1049,241 @@ func TestGzipRequest(t *testing.T) {
 			"expected status %d, got %d",
 			http.StatusCreated,
 			rec.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsAccepted(t *testing.T) {
+	const userID = "user-123"
+
+	serviceCalled := false
+
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			serviceCalled = true
+
+			gotUserID, ok := auth.UserIDFromContext(ctx)
+			if !ok {
+				t.Fatal("expected authenticated user in context")
+			}
+
+			if gotUserID != userID {
+				t.Fatalf(
+					"expected user ID %q, got %q",
+					userID,
+					gotUserID,
+				)
+			}
+
+			wantIDs := []string{
+				"6qxTVvsy",
+				"RTfd56hn",
+				"Jlfd67ds",
+			}
+
+			if !reflect.DeepEqual(ids, wantIDs) {
+				t.Fatalf(
+					"expected ids %#v, got %#v",
+					wantIDs,
+					ids,
+				)
+			}
+
+			return nil
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, userID)
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(
+			`["6qxTVvsy","RTfd56hn","Jlfd67ds"]`,
+		),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusAccepted,
+			response.Code,
+		)
+	}
+
+	if !serviceCalled {
+		t.Fatal("expected DeleteUserURLs to be called")
+	}
+}
+
+func TestURLHandler_DeleteUserURLsBadJSON(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			t.Fatal("DeleteUserURLs should not be called")
+			return nil
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, "user-123")
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`["abc123"`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsEmptyList(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			t.Fatal("DeleteUserURLs should not be called")
+			return nil
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, "user-123")
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`[]`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsUnauthorized(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			t.Fatal("DeleteUserURLs should not be called")
+			return nil
+		},
+	}
+
+	router := newTestRouter(s)
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`["abc123"]`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsServiceError(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			return errors.New("delete service error")
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, "user-123")
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`["abc123"]`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_GetDeletedURL(t *testing.T) {
+	s := &mockURLService{
+		getURLByIDFunc: func(
+			ctx context.Context,
+			id string,
+		) (string, error) {
+			if id != "deleted-id" {
+				t.Fatalf(
+					"expected id %q, got %q",
+					"deleted-id",
+					id,
+				)
+			}
+
+			return "", service.ErrURLDeleted
+		},
+	}
+
+	router := newTestRouter(s)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/deleted-id",
+		nil,
+	)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusGone {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusGone,
+			response.Code,
 		)
 	}
 }

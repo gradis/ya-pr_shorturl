@@ -16,6 +16,7 @@ type URLService interface {
 	AddBatchURLs(ctx context.Context, urls []service.BatchURL) ([]service.BatchURLResult, error)
 	GetURLByID(ctx context.Context, id string) (string, error)
 	GetUserURLs(ctx context.Context) ([]service.UserURL, error)
+	DeleteUserURLs(ctx context.Context, ids []string) error
 }
 
 type URLHandler struct {
@@ -57,6 +58,7 @@ func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
 	router.POST("/api/shorten", h.handleShortenJSON)
 	router.POST("/api/shorten/batch", h.handleShortenBatch)
 	router.GET("/api/user/urls", h.handleUserURLs)
+	router.DELETE("/api/user/urls", h.handleDeleteUserURLs)
 }
 
 func (h *URLHandler) handleUserURLs(c *gin.Context) {
@@ -133,12 +135,20 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 
 	originalURL, err := h.service.GetURLByID(c.Request.Context(), id)
 	if err != nil {
-		if errors.Is(err, service.ErrURLNotFound) {
+		switch {
+		case errors.Is(err, service.ErrURLNotFound):
 			c.String(http.StatusNotFound, "url not found")
-			return
+
+		case errors.Is(err, service.ErrURLDeleted):
+			c.Status(http.StatusGone)
+
+		default:
+			c.String(
+				http.StatusInternalServerError,
+				"internal server error",
+			)
 		}
 
-		c.String(http.StatusInternalServerError, "internal server error")
 		return
 	}
 
@@ -240,4 +250,59 @@ func (h *URLHandler) handleJSONServiceError(c *gin.Context, err error) {
 		http.StatusInternalServerError,
 		gin.H{"error": "internal server error"},
 	)
+}
+
+func (h *URLHandler) handleDeleteUserURLs(c *gin.Context) {
+	ctx := c.Request.Context()
+
+	if auth.HasInvalidCookie(ctx) {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+
+	if _, ok := auth.UserIDFromContext(ctx); !ok {
+		c.Status(http.StatusUnauthorized)
+		return
+	}
+
+	var ids []string
+
+	if err := c.ShouldBindJSON(&ids); err != nil {
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{"error": "bad request"},
+		)
+		return
+	}
+
+	if len(ids) == 0 {
+		c.JSON(
+			http.StatusBadRequest,
+			gin.H{"error": "bad request"},
+		)
+		return
+	}
+
+	if err := h.service.DeleteUserURLs(ctx, ids); err != nil {
+		switch {
+		case errors.Is(err, service.ErrUnauthorized):
+			c.Status(http.StatusUnauthorized)
+
+		case errors.Is(err, service.ErrInvalidURLIDs):
+			c.JSON(
+				http.StatusBadRequest,
+				gin.H{"error": "bad request"},
+			)
+
+		default:
+			c.JSON(
+				http.StatusInternalServerError,
+				gin.H{"error": "internal server error"},
+			)
+		}
+
+		return
+	}
+
+	c.Status(http.StatusAccepted)
 }

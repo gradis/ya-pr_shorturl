@@ -26,6 +26,7 @@ type FileRecord struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
 	UserID      string `json:"user_id,omitempty"`
+	IsDeleted   bool   `json:"is_deleted,omitempty"`
 }
 
 func NewFileRepository(filePath string) (*FileRepository, error) {
@@ -152,6 +153,10 @@ func (r *FileRepository) GetByID(ctx context.Context, id string) (string, error)
 		return "", ErrURLNotFound
 	}
 
+	if record.IsDeleted {
+		return "", ErrURLDeleted
+	}
+
 	return record.OriginalURL, nil
 }
 
@@ -179,6 +184,45 @@ func (r *FileRepository) Exists(id string) bool {
 
 	_, ok := r.urls[id]
 	return ok
+}
+
+func (r *FileRepository) DeleteBatch(ctx context.Context, records []URLDeleteRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rollback := make(map[string]URLRecord)
+
+	for _, deleteRecord := range records {
+		record, exists := r.urls[deleteRecord.ID]
+		if !exists {
+			continue
+		}
+
+		if record.UserID != deleteRecord.UserID {
+			continue
+		}
+
+		if _, saved := rollback[deleteRecord.ID]; !saved {
+			rollback[deleteRecord.ID] = record
+		}
+
+		record.IsDeleted = true
+		r.urls[deleteRecord.ID] = record
+	}
+
+	if err := r.flush(); err != nil {
+		for id, record := range rollback {
+			r.urls[id] = record
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 func (r *FileRepository) load() error {
@@ -219,6 +263,7 @@ func (r *FileRepository) load() error {
 			ID:          record.ShortURL,
 			OriginalURL: record.OriginalURL,
 			UserID:      record.UserID,
+			IsDeleted:   record.IsDeleted,
 		}
 		r.originalIDs[record.OriginalURL] = record.ShortURL
 	}
@@ -263,6 +308,7 @@ func (r *FileRepository) flush() error {
 			ShortURL:    shortID,
 			OriginalURL: record.OriginalURL,
 			UserID:      record.UserID,
+			IsDeleted:   record.IsDeleted,
 		})
 		i++
 	}
