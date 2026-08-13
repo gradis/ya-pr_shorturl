@@ -11,6 +11,7 @@ type Config struct {
 	BaseURL         string
 	FileStoragePath string
 	DatabaseDSN     string
+	AuthSecret      string
 }
 
 func Parse() *Config {
@@ -19,6 +20,7 @@ func Parse() *Config {
 		BaseURL:         "http://localhost:8080",
 		FileStoragePath: "",
 		DatabaseDSN:     "",
+		AuthSecret:      "shortener-auth-secret",
 	}
 
 	flag.StringVar(
@@ -49,6 +51,13 @@ func Parse() *Config {
 		"database DSN",
 	)
 
+	flag.StringVar(
+		&cfg.AuthSecret,
+		"s",
+		cfg.AuthSecret,
+		"authentication cookie signing secret",
+	)
+
 	flag.Parse()
 
 	if value, ok := lookupNonEmptyEnv("SERVER_ADDRESS"); ok {
@@ -65,6 +74,10 @@ func Parse() *Config {
 
 	if value, ok := lookupNonEmptyEnv("DATABASE_DSN"); ok {
 		cfg.DatabaseDSN = value
+	}
+
+	if value, ok := lookupNonEmptyEnv("AUTH_SECRET"); ok {
+		cfg.AuthSecret = value
 	}
 
 	return cfg

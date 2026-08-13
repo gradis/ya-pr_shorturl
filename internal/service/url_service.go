@@ -8,27 +8,40 @@ import (
 	"math/big"
 	"net/url"
 	"strings"
+	"sync"
 
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
+	"go.uber.org/zap"
 )
 
 const defaultBaseURL = "http://localhost:8080"
 
 var (
 	ErrURLNotFound      = errors.New("url not found")
+	ErrURLDeleted       = errors.New("url deleted")
 	ErrInvalidURL       = errors.New("invalid URL")
+	ErrInvalidURLIDs    = errors.New("invalid URL ids")
 	ErrURLAlreadyExists = errors.New("URL already exists")
+	ErrUnauthorized     = errors.New("user is not authenticated")
 )
 
 type URLRepository interface {
 	SaveURL(ctx context.Context, id string, originalURL string) (repository.URLSaveResult, error)
 	SaveBatch(ctx context.Context, records []repository.URLRecord) ([]repository.URLRecord, error)
 	GetByID(ctx context.Context, id string) (string, error)
+	GetByUserID(ctx context.Context, userID string) ([]repository.URLRecord, error)
+	DeleteBatch(ctx context.Context, records []repository.URLDeleteRecord) error
 }
 
 type URLService struct {
 	repo    URLRepository
 	baseURL string
+	logg    *zap.Logger
+
+	deleteQueue chan deleteRequest
+	deleteWG    sync.WaitGroup
+	closeOnce   sync.Once
 }
 
 type BatchURL struct {
@@ -41,17 +54,34 @@ type BatchURLResult struct {
 	ShortURL      string
 }
 
-func NewURLService(repo URLRepository, baseURL string) *URLService {
+type UserURL struct {
+	ShortURL    string
+	OriginalURL string
+}
+
+func NewURLService(
+	repo URLRepository,
+	baseURL string,
+	logg *zap.Logger,
+) *URLService {
 	if baseURL == "" {
 		baseURL = defaultBaseURL
 	}
 
-	baseURL = strings.TrimRight(baseURL, "/")
-
-	return &URLService{
-		repo:    repo,
-		baseURL: baseURL,
+	if logg == nil {
+		logg = zap.NewNop()
 	}
+
+	service := &URLService{
+		repo:        repo,
+		baseURL:     strings.TrimRight(baseURL, "/"),
+		logg:        logg,
+		deleteQueue: make(chan deleteRequest, deleteQueueSize),
+	}
+
+	service.startDeleteWorker()
+
+	return service
 }
 
 func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, error) {
@@ -136,13 +166,85 @@ func (s *URLService) saveWithUniqueID(ctx context.Context, originalURL string) (
 func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) {
 	originalURL, err := s.repo.GetByID(ctx, id)
 	if err != nil {
-		if errors.Is(err, repository.ErrURLNotFound) {
+		switch {
+		case errors.Is(err, repository.ErrURLNotFound):
 			return "", ErrURLNotFound
+
+		case errors.Is(err, repository.ErrURLDeleted):
+			return "", ErrURLDeleted
+
+		default:
+			return "", fmt.Errorf("get URL by ID: %w", err)
 		}
-		return "", fmt.Errorf("get URL by ID: %w", err)
 	}
 
 	return originalURL, nil
+}
+
+func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return nil, ErrUnauthorized
+	}
+
+	records, err := s.repo.GetByUserID(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get user URLs: %w", err)
+	}
+
+	urls := make([]UserURL, 0, len(records))
+	for _, record := range records {
+		urls = append(urls, UserURL{
+			ShortURL:    fmt.Sprintf("%s/%s", s.baseURL, record.ID),
+			OriginalURL: record.OriginalURL,
+		})
+	}
+
+	return urls, nil
+}
+
+func (s *URLService) DeleteUserURLs(
+	ctx context.Context,
+	ids []string,
+) error {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return ErrUnauthorized
+	}
+
+	cleanIDs := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+
+		if _, exists := seen[id]; exists {
+			continue
+		}
+
+		seen[id] = struct{}{}
+		cleanIDs = append(cleanIDs, id)
+	}
+
+	if len(cleanIDs) == 0 {
+		return ErrInvalidURLIDs
+	}
+
+	request := deleteRequest{
+		UserID: userID,
+		IDs:    cleanIDs,
+	}
+
+	select {
+	case s.deleteQueue <- request:
+		return nil
+
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func generateID(length int) (string, error) {

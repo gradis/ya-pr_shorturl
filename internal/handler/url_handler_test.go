@@ -9,13 +9,17 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/middleware"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type mockURLService struct {
@@ -33,6 +37,15 @@ type mockURLService struct {
 		ctx context.Context,
 		urls []service.BatchURL,
 	) ([]service.BatchURLResult, error)
+
+	getUserURLsFunc func(
+		ctx context.Context,
+	) ([]service.UserURL, error)
+
+	deleteUserURLsFunc func(
+		ctx context.Context,
+		ids []string,
+	) error
 }
 
 var _ URLService = (*mockURLService)(nil)
@@ -70,13 +83,41 @@ func (m *mockURLService) AddBatchURLs(
 	return nil, nil
 }
 
+func (m *mockURLService) GetUserURLs(
+	ctx context.Context,
+) ([]service.UserURL, error) {
+	if m.getUserURLsFunc != nil {
+		return m.getUserURLsFunc(ctx)
+	}
+
+	return nil, nil
+}
+
+func (m *mockURLService) DeleteUserURLs(
+	ctx context.Context,
+	ids []string,
+) error {
+	if m.deleteUserURLsFunc != nil {
+		return m.deleteUserURLsFunc(ctx, ids)
+	}
+
+	return nil
+}
+
 func newTestRouter(s URLService) *gin.Engine {
+	return newTestRouterWithLogger(s, zap.NewNop())
+}
+
+func newTestRouterWithLogger(
+	s URLService,
+	logg *zap.Logger,
+) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
 	router.HandleMethodNotAllowed = true
 
-	h := NewURLHandler(s)
+	h := NewURLHandler(s, logg)
 	h.RegisterRoutes(router)
 
 	router.NoRoute(func(c *gin.Context) {
@@ -86,6 +127,30 @@ func newTestRouter(s URLService) *gin.Engine {
 	router.NoMethod(func(c *gin.Context) {
 		c.String(http.StatusBadRequest, "bad request")
 	})
+
+	return router
+}
+
+func newAuthenticatedTestRouter(
+	s URLService,
+	userID string,
+) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+
+	router := gin.New()
+
+	router.Use(func(c *gin.Context) {
+		ctx := auth.WithUserID(
+			c.Request.Context(),
+			userID,
+		)
+
+		c.Request = c.Request.WithContext(ctx)
+		c.Next()
+	})
+
+	h := NewURLHandler(s, zap.NewNop())
+	h.RegisterRoutes(router)
 
 	return router
 }
@@ -217,6 +282,9 @@ func TestURLHandler_PostEmptyBody(t *testing.T) {
 }
 
 func TestURLHandler_PostServiceError(t *testing.T) {
+	core, recorded := observer.New(zap.ErrorLevel)
+	logg := zap.New(core)
+
 	s := &mockURLService{
 		addURLFunc: func(
 			ctx context.Context,
@@ -235,7 +303,7 @@ func TestURLHandler_PostServiceError(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter(s)
+	router := newTestRouterWithLogger(s, logg)
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -252,6 +320,27 @@ func TestURLHandler_PostServiceError(t *testing.T) {
 			http.StatusInternalServerError,
 			rec.Code,
 		)
+	}
+
+	if got := rec.Body.String(); got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf(
+			"expected safe response body %q, got %q",
+			http.StatusText(http.StatusInternalServerError),
+			got,
+		)
+	}
+
+	entries := recorded.All()
+	if len(entries) != 1 {
+		t.Fatalf("expected one error log entry, got %d", len(entries))
+	}
+
+	fields := entries[0].ContextMap()
+	if fields["method"] != http.MethodPost || fields["path"] != "/" {
+		t.Fatalf("unexpected log context: %#v", fields)
+	}
+	if fields["error"] != "service error" {
+		t.Fatalf("expected service error in log, got %#v", fields["error"])
 	}
 }
 
@@ -290,6 +379,7 @@ func TestURLHandler_PostConflict(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -444,6 +534,9 @@ func TestURLHandler_GetNotFound(t *testing.T) {
 }
 
 func TestURLHandler_GetServiceError(t *testing.T) {
+	core, recorded := observer.New(zap.ErrorLevel)
+	logg := zap.New(core)
+
 	s := &mockURLService{
 		getURLByIDFunc: func(
 			ctx context.Context,
@@ -461,7 +554,7 @@ func TestURLHandler_GetServiceError(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter(s)
+	router := newTestRouterWithLogger(s, logg)
 
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -474,6 +567,18 @@ func TestURLHandler_GetServiceError(t *testing.T) {
 			http.StatusInternalServerError,
 			rec.Code,
 		)
+	}
+
+	if got := rec.Body.String(); got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf(
+			"expected safe response body %q, got %q",
+			http.StatusText(http.StatusInternalServerError),
+			got,
+		)
+	}
+
+	if recorded.Len() != 1 {
+		t.Fatalf("expected one error log entry, got %d", recorded.Len())
 	}
 }
 
@@ -499,6 +604,7 @@ func TestHandleShortenJSON(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -570,6 +676,9 @@ func TestHandleShortenJSON_BadRequest(t *testing.T) {
 }
 
 func TestHandleShortenJSON_ServiceError(t *testing.T) {
+	core, recorded := observer.New(zap.ErrorLevel)
+	logg := zap.New(core)
+
 	s := &mockURLService{
 		addURLFunc: func(
 			ctx context.Context,
@@ -579,7 +688,7 @@ func TestHandleShortenJSON_ServiceError(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter(s)
+	router := newTestRouterWithLogger(s, logg)
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -600,6 +709,23 @@ func TestHandleShortenJSON_ServiceError(t *testing.T) {
 			rec.Code,
 		)
 	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if got := response["error"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf(
+			"expected safe response error %q, got %q",
+			http.StatusText(http.StatusInternalServerError),
+			got,
+		)
+	}
+
+	if recorded.Len() != 1 {
+		t.Fatalf("expected one error log entry, got %d", recorded.Len())
+	}
 }
 
 func TestHandleShortenJSON_Conflict(t *testing.T) {
@@ -607,6 +733,7 @@ func TestHandleShortenJSON_Conflict(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -670,6 +797,7 @@ func TestHandleShortenBatch(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -741,11 +869,154 @@ func TestHandleShortenBatch_Empty(t *testing.T) {
 	}
 }
 
+func TestHandleUserURLs_Unauthorized(t *testing.T) {
+	router := newTestRouter(&mockURLService{})
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	request.AddCookie(&http.Cookie{
+		Name:  auth.CookieName,
+		Value: "cookie-without-authenticated-user",
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			response.Code,
+		)
+	}
+}
+
+func TestHandleUserURLs_InvalidCookieIsRejected(t *testing.T) {
+	const secret = "test-signing-secret"
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080", zap.NewNop())
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Authentication(secret))
+	NewURLHandler(svc, zap.NewNop()).RegisterRoutes(router)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	request.AddCookie(&http.Cookie{
+		Name:  auth.CookieName,
+		Value: "forged-token",
+	})
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			response.Code,
+		)
+	}
+
+	if got := response.Header().Get("Set-Cookie"); got != "" {
+		t.Fatalf("did not expect a replacement cookie, got %q", got)
+	}
+}
+
+func TestHandleUserURLs_ReturnsOnlyAuthenticatedUserURLs(t *testing.T) {
+	const secret = "test-signing-secret"
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080", zap.NewNop())
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Authentication(secret))
+	NewURLHandler(svc, zap.NewNop()).RegisterRoutes(router)
+
+	createRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(`{"url":"https://example.com/user-one"}`),
+	)
+	createRequest.Header.Set("Content-Type", "application/json")
+	createResponse := httptest.NewRecorder()
+	router.ServeHTTP(createResponse, createRequest)
+
+	if createResponse.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createResponse.Code)
+	}
+
+	cookies := createResponse.Result().Cookies()
+	if len(cookies) != 1 {
+		t.Fatalf("expected authentication cookie, got %d cookies", len(cookies))
+	}
+
+	otherUserRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/shorten",
+		strings.NewReader(`{"url":"https://example.com/user-two"}`),
+	)
+	otherUserRequest.Header.Set("Content-Type", "application/json")
+	otherUserResponse := httptest.NewRecorder()
+	router.ServeHTTP(otherUserResponse, otherUserRequest)
+
+	listRequest := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	listRequest.AddCookie(cookies[0])
+	listResponse := httptest.NewRecorder()
+	router.ServeHTTP(listResponse, listRequest)
+
+	if listResponse.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listResponse.Code)
+	}
+
+	var response []userURLResponse
+	if err := json.Unmarshal(listResponse.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+
+	if len(response) != 1 {
+		t.Fatalf("expected one user URL, got %d", len(response))
+	}
+	if response[0].OriginalURL != "https://example.com/user-one" {
+		t.Fatalf("unexpected original URL %q", response[0].OriginalURL)
+	}
+	if !strings.HasPrefix(response[0].ShortURL, "http://localhost:8080/") {
+		t.Fatalf("unexpected short URL %q", response[0].ShortURL)
+	}
+}
+
+func TestHandleUserURLs_NoContent(t *testing.T) {
+	const secret = "test-signing-secret"
+
+	repo := repository.NewMemoryRepository()
+	svc := service.NewURLService(repo, "http://localhost:8080", zap.NewNop())
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(middleware.Authentication(secret))
+	NewURLHandler(svc, zap.NewNop()).RegisterRoutes(router)
+
+	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusNoContent {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusNoContent,
+			response.Code,
+		)
+	}
+	if response.Body.Len() != 0 {
+		t.Fatalf("expected empty response body, got %q", response.Body.String())
+	}
+}
+
 func TestGzipResponse(t *testing.T) {
 	repo := repository.NewMemoryRepository()
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -753,7 +1024,7 @@ func TestGzipResponse(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.Gzip())
 
-	h := NewURLHandler(svc)
+	h := NewURLHandler(svc, zap.NewNop())
 	h.RegisterRoutes(router)
 
 	req := httptest.NewRequest(
@@ -807,6 +1078,7 @@ func TestGzipRequest(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -814,7 +1086,7 @@ func TestGzipRequest(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.Gzip())
 
-	h := NewURLHandler(svc)
+	h := NewURLHandler(svc, zap.NewNop())
 	h.RegisterRoutes(router)
 
 	var buffer bytes.Buffer
@@ -847,6 +1119,241 @@ func TestGzipRequest(t *testing.T) {
 			"expected status %d, got %d",
 			http.StatusCreated,
 			rec.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsAccepted(t *testing.T) {
+	const userID = "user-123"
+
+	serviceCalled := false
+
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			serviceCalled = true
+
+			gotUserID, ok := auth.UserIDFromContext(ctx)
+			if !ok {
+				t.Fatal("expected authenticated user in context")
+			}
+
+			if gotUserID != userID {
+				t.Fatalf(
+					"expected user ID %q, got %q",
+					userID,
+					gotUserID,
+				)
+			}
+
+			wantIDs := []string{
+				"6qxTVvsy",
+				"RTfd56hn",
+				"Jlfd67ds",
+			}
+
+			if !reflect.DeepEqual(ids, wantIDs) {
+				t.Fatalf(
+					"expected ids %#v, got %#v",
+					wantIDs,
+					ids,
+				)
+			}
+
+			return nil
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, userID)
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(
+			`["6qxTVvsy","RTfd56hn","Jlfd67ds"]`,
+		),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusAccepted {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusAccepted,
+			response.Code,
+		)
+	}
+
+	if !serviceCalled {
+		t.Fatal("expected DeleteUserURLs to be called")
+	}
+}
+
+func TestURLHandler_DeleteUserURLsBadJSON(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			t.Fatal("DeleteUserURLs should not be called")
+			return nil
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, "user-123")
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`["abc123"`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsEmptyList(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			t.Fatal("DeleteUserURLs should not be called")
+			return nil
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, "user-123")
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`[]`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusBadRequest,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsUnauthorized(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			t.Fatal("DeleteUserURLs should not be called")
+			return nil
+		},
+	}
+
+	router := newTestRouter(s)
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`["abc123"]`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_DeleteUserURLsServiceError(t *testing.T) {
+	s := &mockURLService{
+		deleteUserURLsFunc: func(
+			ctx context.Context,
+			ids []string,
+		) error {
+			return errors.New("delete service error")
+		},
+	}
+
+	router := newAuthenticatedTestRouter(s, "user-123")
+
+	request := httptest.NewRequest(
+		http.MethodDelete,
+		"/api/user/urls",
+		strings.NewReader(`["abc123"]`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusInternalServerError {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusInternalServerError,
+			response.Code,
+		)
+	}
+}
+
+func TestURLHandler_GetDeletedURL(t *testing.T) {
+	s := &mockURLService{
+		getURLByIDFunc: func(
+			ctx context.Context,
+			id string,
+		) (string, error) {
+			if id != "deleted-id" {
+				t.Fatalf(
+					"expected id %q, got %q",
+					"deleted-id",
+					id,
+				)
+			}
+
+			return "", service.ErrURLDeleted
+		},
+	}
+
+	router := newTestRouter(s)
+
+	request := httptest.NewRequest(
+		http.MethodGet,
+		"/deleted-id",
+		nil,
+	)
+
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+
+	if response.Code != http.StatusGone {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusGone,
+			response.Code,
 		)
 	}
 }

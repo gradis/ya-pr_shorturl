@@ -37,8 +37,10 @@ func main() {
 	}
 	defer storage.Close()
 
-	urlService := service.NewURLService(storage, cfg.BaseURL)
-	urlHandler := handler.NewURLHandler(urlService)
+	urlService := service.NewURLService(storage, cfg.BaseURL, logg)
+	defer urlService.Close()
+
+	urlHandler := handler.NewURLHandler(urlService, logg)
 	pingHandler := handler.NewPingHandler(storage, logg)
 
 	router := gin.New()
@@ -46,6 +48,7 @@ func main() {
 	router.Use(gin.Recovery())
 	router.Use(middleware.RequestLogger(logg))
 	router.Use(middleware.Gzip())
+	router.Use(middleware.Authentication(cfg.AuthSecret))
 
 	router.HandleMethodNotAllowed = true
 

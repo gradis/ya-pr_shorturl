@@ -2,8 +2,11 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 )
 
 func TestFileRepository_SaveAndLoad(t *testing.T) {
@@ -37,5 +40,70 @@ func TestFileRepository_SaveAndLoad(t *testing.T) {
 	want := "https://practicum.yandex.ru"
 	if got != want {
 		t.Fatalf("want %q, got %q", want, got)
+	}
+}
+
+func TestFileRepository_DeletePersistsAfterReload(t *testing.T) {
+	path := filepath.Join(
+		t.TempDir(),
+		"storage.json",
+	)
+
+	repo, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf(
+			"NewFileRepository returned error: %v",
+			err,
+		)
+	}
+
+	saveCtx := auth.WithUserID(
+		context.Background(),
+		"user-123",
+	)
+
+	_, err = repo.SaveURL(
+		saveCtx,
+		"abc123",
+		"https://example.com",
+	)
+	if err != nil {
+		t.Fatalf("SaveURL returned error: %v", err)
+	}
+
+	err = repo.DeleteBatch(
+		context.Background(),
+		[]URLDeleteRecord{
+			{
+				ID:     "abc123",
+				UserID: "user-123",
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf(
+			"DeleteBatch returned error: %v",
+			err,
+		)
+	}
+
+	reloadedRepo, err := NewFileRepository(path)
+	if err != nil {
+		t.Fatalf(
+			"reload repository: %v",
+			err,
+		)
+	}
+
+	_, err = reloadedRepo.GetByID(
+		context.Background(),
+		"abc123",
+	)
+
+	if !errors.Is(err, ErrURLDeleted) {
+		t.Fatalf(
+			"expected ErrURLDeleted after reload, got %v",
+			err,
+		)
 	}
 }

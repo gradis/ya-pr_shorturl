@@ -10,12 +10,14 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+
+	"github.com/gradis/ya-pr_shorturl/internal/auth"
 )
 
 type FileRepository struct {
 	mu          sync.RWMutex
 	filePath    string
-	urls        map[string]string
+	urls        map[string]URLRecord
 	originalIDs map[string]string
 }
 
@@ -23,12 +25,14 @@ type FileRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+	UserID      string `json:"user_id,omitempty"`
+	IsDeleted   bool   `json:"is_deleted,omitempty"`
 }
 
 func NewFileRepository(filePath string) (*FileRepository, error) {
 	repo := &FileRepository{
 		filePath:    filePath,
-		urls:        make(map[string]string),
+		urls:        make(map[string]URLRecord),
 		originalIDs: make(map[string]string),
 	}
 
@@ -64,7 +68,12 @@ func (r *FileRepository) SaveURL(ctx context.Context, id string, originalURL str
 		return URLSaveResult{}, ErrURLIDConflict
 	}
 
-	r.urls[id] = originalURL
+	userID, _ := auth.UserIDFromContext(ctx)
+	r.urls[id] = URLRecord{
+		ID:          id,
+		OriginalURL: originalURL,
+		UserID:      userID,
+	}
 	r.originalIDs[originalURL] = id
 
 	if err := r.flush(); err != nil {
@@ -85,7 +94,7 @@ func (r *FileRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]
 	defer r.mu.Unlock()
 
 	result := make([]URLRecord, 0, len(records))
-	urlsRollback := make(map[string]string, len(records))
+	urlsRollback := make(map[string]URLRecord, len(records))
 	originalIDsRollback := make(map[string]string, len(records))
 
 	for _, record := range records {
@@ -102,7 +111,10 @@ func (r *FileRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]
 			return nil, ErrURLIDConflict
 		}
 
-		r.urls[record.ID] = record.OriginalURL
+		if record.UserID == "" {
+			record.UserID, _ = auth.UserIDFromContext(ctx)
+		}
+		r.urls[record.ID] = record
 		r.originalIDs[record.OriginalURL] = record.ID
 		originalIDsRollback[record.OriginalURL] = ""
 		result = append(result, record)
@@ -136,12 +148,34 @@ func (r *FileRepository) GetByID(ctx context.Context, id string) (string, error)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	originalURL, exists := r.urls[id]
+	record, exists := r.urls[id]
 	if !exists {
 		return "", ErrURLNotFound
 	}
 
-	return originalURL, nil
+	if record.IsDeleted {
+		return "", ErrURLDeleted
+	}
+
+	return record.OriginalURL, nil
+}
+
+func (r *FileRepository) GetByUserID(ctx context.Context, userID string) ([]URLRecord, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	records := make([]URLRecord, 0)
+	for _, record := range r.urls {
+		if record.UserID == userID {
+			records = append(records, record)
+		}
+	}
+
+	return records, nil
 }
 
 func (r *FileRepository) Exists(id string) bool {
@@ -150,6 +184,45 @@ func (r *FileRepository) Exists(id string) bool {
 
 	_, ok := r.urls[id]
 	return ok
+}
+
+func (r *FileRepository) DeleteBatch(ctx context.Context, records []URLDeleteRecord) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	rollback := make(map[string]URLRecord)
+
+	for _, deleteRecord := range records {
+		record, exists := r.urls[deleteRecord.ID]
+		if !exists {
+			continue
+		}
+
+		if record.UserID != deleteRecord.UserID {
+			continue
+		}
+
+		if _, saved := rollback[deleteRecord.ID]; !saved {
+			rollback[deleteRecord.ID] = record
+		}
+
+		record.IsDeleted = true
+		r.urls[deleteRecord.ID] = record
+	}
+
+	if err := r.flush(); err != nil {
+		for id, record := range rollback {
+			r.urls[id] = record
+		}
+
+		return err
+	}
+
+	return nil
 }
 
 func (r *FileRepository) load() error {
@@ -186,7 +259,12 @@ func (r *FileRepository) load() error {
 			return err
 		}
 
-		r.urls[record.ShortURL] = record.OriginalURL
+		r.urls[record.ShortURL] = URLRecord{
+			ID:          record.ShortURL,
+			OriginalURL: record.OriginalURL,
+			UserID:      record.UserID,
+			IsDeleted:   record.IsDeleted,
+		}
 		r.originalIDs[record.OriginalURL] = record.ShortURL
 	}
 
@@ -200,7 +278,11 @@ func (r *FileRepository) loadJSONRecords(data []byte) error {
 	}
 
 	for _, record := range records {
-		r.urls[record.ShortURL] = record.OriginalURL
+		r.urls[record.ShortURL] = URLRecord{
+			ID:          record.ShortURL,
+			OriginalURL: record.OriginalURL,
+			UserID:      record.UserID,
+		}
 		r.originalIDs[record.OriginalURL] = record.ShortURL
 	}
 
@@ -220,11 +302,13 @@ func (r *FileRepository) flush() error {
 	records := make([]FileRecord, 0, len(r.urls))
 
 	i := 1
-	for shortID, originalURL := range r.urls {
+	for shortID, record := range r.urls {
 		records = append(records, FileRecord{
 			UUID:        strconv.Itoa(i),
 			ShortURL:    shortID,
-			OriginalURL: originalURL,
+			OriginalURL: record.OriginalURL,
+			UserID:      record.UserID,
+			IsDeleted:   record.IsDeleted,
 		})
 		i++
 	}
