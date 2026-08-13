@@ -30,11 +30,8 @@ type URLRepository interface {
 	SaveURL(ctx context.Context, id string, originalURL string) (repository.URLSaveResult, error)
 	SaveBatch(ctx context.Context, records []repository.URLRecord) ([]repository.URLRecord, error)
 	GetByID(ctx context.Context, id string) (string, error)
-	DeleteBatch(ctx context.Context, records []repository.URLDeleteRecord) error
-}
-
-type UserURLRepository interface {
 	GetByUserID(ctx context.Context, userID string) ([]repository.URLRecord, error)
+	DeleteBatch(ctx context.Context, records []repository.URLDeleteRecord) error
 }
 
 type URLService struct {
@@ -62,21 +59,7 @@ type UserURL struct {
 	OriginalURL string
 }
 
-func NewURLService(repo URLRepository, baseURL string) *URLService {
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-
-	baseURL = strings.TrimRight(baseURL, "/")
-
-	return NewURLServiceWithLogger(
-		repo,
-		baseURL,
-		zap.NewNop(),
-	)
-}
-
-func NewURLServiceWithLogger(
+func NewURLService(
 	repo URLRepository,
 	baseURL string,
 	logg *zap.Logger,
@@ -204,12 +187,7 @@ func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
 		return nil, ErrUnauthorized
 	}
 
-	userRepo, ok := s.repo.(UserURLRepository)
-	if !ok {
-		return nil, errors.New("repository does not support user URLs")
-	}
-
-	records, err := userRepo.GetByUserID(ctx, userID)
+	records, err := s.repo.GetByUserID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("get user URLs: %w", err)
 	}
@@ -223,6 +201,50 @@ func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
 	}
 
 	return urls, nil
+}
+
+func (s *URLService) DeleteUserURLs(
+	ctx context.Context,
+	ids []string,
+) error {
+	userID, ok := auth.UserIDFromContext(ctx)
+	if !ok {
+		return ErrUnauthorized
+	}
+
+	cleanIDs := make([]string, 0, len(ids))
+	seen := make(map[string]struct{}, len(ids))
+
+	for _, id := range ids {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+
+		if _, exists := seen[id]; exists {
+			continue
+		}
+
+		seen[id] = struct{}{}
+		cleanIDs = append(cleanIDs, id)
+	}
+
+	if len(cleanIDs) == 0 {
+		return ErrInvalidURLIDs
+	}
+
+	request := deleteRequest{
+		UserID: userID,
+		IDs:    cleanIDs,
+	}
+
+	select {
+	case s.deleteQueue <- request:
+		return nil
+
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func generateID(length int) (string, error) {

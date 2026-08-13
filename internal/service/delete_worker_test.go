@@ -1,4 +1,4 @@
-﻿package service
+package service
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 
 	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
+	"go.uber.org/zap"
 )
 
 type deleteRepositoryMock struct {
@@ -38,6 +39,13 @@ func (m *deleteRepositoryMock) GetByID(
 	id string,
 ) (string, error) {
 	return "", repository.ErrURLNotFound
+}
+
+func (m *deleteRepositoryMock) GetByUserID(
+	ctx context.Context,
+	userID string,
+) ([]repository.URLRecord, error) {
+	return nil, nil
 }
 
 func (m *deleteRepositoryMock) DeleteBatch(
@@ -71,6 +79,7 @@ func TestURLService_DeleteUserURLsUnauthorized(t *testing.T) {
 	svc := NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	defer svc.Close()
 
@@ -93,6 +102,7 @@ func TestURLService_DeleteUserURLsInvalidIDs(t *testing.T) {
 	svc := NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	defer svc.Close()
 
@@ -120,6 +130,7 @@ func TestURLService_DeleteUserURLsQueuesRecords(t *testing.T) {
 	svc := NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 
 	ctx := auth.WithUserID(

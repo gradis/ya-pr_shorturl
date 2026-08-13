@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
+	"go.uber.org/zap"
 )
 
 type URLService interface {
@@ -21,11 +22,17 @@ type URLService interface {
 
 type URLHandler struct {
 	service URLService
+	logg    *zap.Logger
 }
 
-func NewURLHandler(service URLService) *URLHandler {
+func NewURLHandler(service URLService, logg *zap.Logger) *URLHandler {
+	if logg == nil {
+		logg = zap.NewNop()
+	}
+
 	return &URLHandler{
 		service: service,
+		logg:    logg,
 	}
 }
 
@@ -62,11 +69,6 @@ func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
 }
 
 func (h *URLHandler) handleUserURLs(c *gin.Context) {
-	if auth.HasInvalidCookie(c.Request.Context()) {
-		c.Status(http.StatusUnauthorized)
-		return
-	}
-
 	if _, ok := auth.UserIDFromContext(c.Request.Context()); !ok {
 		c.Status(http.StatusUnauthorized)
 		return
@@ -79,7 +81,7 @@ func (h *URLHandler) handleUserURLs(c *gin.Context) {
 			return
 		}
 
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "internal server error"})
+		h.handleJSONServiceError(c, err)
 		return
 	}
 
@@ -143,9 +145,10 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 			c.Status(http.StatusGone)
 
 		default:
+			h.logInternalError(c, err)
 			c.String(
 				http.StatusInternalServerError,
-				"internal server error",
+				http.StatusText(http.StatusInternalServerError),
 			)
 		}
 
@@ -237,7 +240,11 @@ func (h *URLHandler) handleTextServiceError(c *gin.Context, err error) {
 		return
 	}
 
-	c.String(http.StatusInternalServerError, "internal server error")
+	h.logInternalError(c, err)
+	c.String(
+		http.StatusInternalServerError,
+		http.StatusText(http.StatusInternalServerError),
+	)
 }
 
 func (h *URLHandler) handleJSONServiceError(c *gin.Context, err error) {
@@ -246,19 +253,15 @@ func (h *URLHandler) handleJSONServiceError(c *gin.Context, err error) {
 		return
 	}
 
+	h.logInternalError(c, err)
 	c.JSON(
 		http.StatusInternalServerError,
-		gin.H{"error": "internal server error"},
+		gin.H{"error": http.StatusText(http.StatusInternalServerError)},
 	)
 }
 
 func (h *URLHandler) handleDeleteUserURLs(c *gin.Context) {
 	ctx := c.Request.Context()
-
-	if auth.HasInvalidCookie(ctx) {
-		c.Status(http.StatusUnauthorized)
-		return
-	}
 
 	if _, ok := auth.UserIDFromContext(ctx); !ok {
 		c.Status(http.StatusUnauthorized)
@@ -295,14 +298,20 @@ func (h *URLHandler) handleDeleteUserURLs(c *gin.Context) {
 			)
 
 		default:
-			c.JSON(
-				http.StatusInternalServerError,
-				gin.H{"error": "internal server error"},
-			)
+			h.handleJSONServiceError(c, err)
 		}
 
 		return
 	}
 
 	c.Status(http.StatusAccepted)
+}
+
+func (h *URLHandler) logInternalError(c *gin.Context, err error) {
+	h.logg.Error(
+		"URL handler request failed",
+		zap.String("method", c.Request.Method),
+		zap.String("path", c.Request.URL.Path),
+		zap.Error(err),
+	)
 }

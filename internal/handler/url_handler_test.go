@@ -18,6 +18,8 @@ import (
 	"github.com/gradis/ya-pr_shorturl/internal/middleware"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 type mockURLService struct {
@@ -103,12 +105,19 @@ func (m *mockURLService) DeleteUserURLs(
 }
 
 func newTestRouter(s URLService) *gin.Engine {
+	return newTestRouterWithLogger(s, zap.NewNop())
+}
+
+func newTestRouterWithLogger(
+	s URLService,
+	logg *zap.Logger,
+) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 
 	router := gin.New()
 	router.HandleMethodNotAllowed = true
 
-	h := NewURLHandler(s)
+	h := NewURLHandler(s, logg)
 	h.RegisterRoutes(router)
 
 	router.NoRoute(func(c *gin.Context) {
@@ -140,7 +149,7 @@ func newAuthenticatedTestRouter(
 		c.Next()
 	})
 
-	h := NewURLHandler(s)
+	h := NewURLHandler(s, zap.NewNop())
 	h.RegisterRoutes(router)
 
 	return router
@@ -273,6 +282,9 @@ func TestURLHandler_PostEmptyBody(t *testing.T) {
 }
 
 func TestURLHandler_PostServiceError(t *testing.T) {
+	core, recorded := observer.New(zap.ErrorLevel)
+	logg := zap.New(core)
+
 	s := &mockURLService{
 		addURLFunc: func(
 			ctx context.Context,
@@ -291,7 +303,7 @@ func TestURLHandler_PostServiceError(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter(s)
+	router := newTestRouterWithLogger(s, logg)
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -308,6 +320,27 @@ func TestURLHandler_PostServiceError(t *testing.T) {
 			http.StatusInternalServerError,
 			rec.Code,
 		)
+	}
+
+	if got := rec.Body.String(); got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf(
+			"expected safe response body %q, got %q",
+			http.StatusText(http.StatusInternalServerError),
+			got,
+		)
+	}
+
+	entries := recorded.All()
+	if len(entries) != 1 {
+		t.Fatalf("expected one error log entry, got %d", len(entries))
+	}
+
+	fields := entries[0].ContextMap()
+	if fields["method"] != http.MethodPost || fields["path"] != "/" {
+		t.Fatalf("unexpected log context: %#v", fields)
+	}
+	if fields["error"] != "service error" {
+		t.Fatalf("expected service error in log, got %#v", fields["error"])
 	}
 }
 
@@ -346,6 +379,7 @@ func TestURLHandler_PostConflict(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -500,6 +534,9 @@ func TestURLHandler_GetNotFound(t *testing.T) {
 }
 
 func TestURLHandler_GetServiceError(t *testing.T) {
+	core, recorded := observer.New(zap.ErrorLevel)
+	logg := zap.New(core)
+
 	s := &mockURLService{
 		getURLByIDFunc: func(
 			ctx context.Context,
@@ -517,7 +554,7 @@ func TestURLHandler_GetServiceError(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter(s)
+	router := newTestRouterWithLogger(s, logg)
 
 	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
 	rec := httptest.NewRecorder()
@@ -530,6 +567,18 @@ func TestURLHandler_GetServiceError(t *testing.T) {
 			http.StatusInternalServerError,
 			rec.Code,
 		)
+	}
+
+	if got := rec.Body.String(); got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf(
+			"expected safe response body %q, got %q",
+			http.StatusText(http.StatusInternalServerError),
+			got,
+		)
+	}
+
+	if recorded.Len() != 1 {
+		t.Fatalf("expected one error log entry, got %d", recorded.Len())
 	}
 }
 
@@ -555,6 +604,7 @@ func TestHandleShortenJSON(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -626,6 +676,9 @@ func TestHandleShortenJSON_BadRequest(t *testing.T) {
 }
 
 func TestHandleShortenJSON_ServiceError(t *testing.T) {
+	core, recorded := observer.New(zap.ErrorLevel)
+	logg := zap.New(core)
+
 	s := &mockURLService{
 		addURLFunc: func(
 			ctx context.Context,
@@ -635,7 +688,7 @@ func TestHandleShortenJSON_ServiceError(t *testing.T) {
 		},
 	}
 
-	router := newTestRouter(s)
+	router := newTestRouterWithLogger(s, logg)
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -656,6 +709,23 @@ func TestHandleShortenJSON_ServiceError(t *testing.T) {
 			rec.Code,
 		)
 	}
+
+	var response map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to decode error response: %v", err)
+	}
+
+	if got := response["error"]; got != http.StatusText(http.StatusInternalServerError) {
+		t.Fatalf(
+			"expected safe response error %q, got %q",
+			http.StatusText(http.StatusInternalServerError),
+			got,
+		)
+	}
+
+	if recorded.Len() != 1 {
+		t.Fatalf("expected one error log entry, got %d", recorded.Len())
+	}
 }
 
 func TestHandleShortenJSON_Conflict(t *testing.T) {
@@ -663,6 +733,7 @@ func TestHandleShortenJSON_Conflict(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -726,6 +797,7 @@ func TestHandleShortenBatch(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 	router := newTestRouter(svc)
 
@@ -817,16 +889,16 @@ func TestHandleUserURLs_Unauthorized(t *testing.T) {
 	}
 }
 
-func TestHandleUserURLs_InvalidCookieIsReplacedAndUnauthorized(t *testing.T) {
+func TestHandleUserURLs_InvalidCookieIsRejected(t *testing.T) {
 	const secret = "test-signing-secret"
 
 	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	svc := service.NewURLService(repo, "http://localhost:8080", zap.NewNop())
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.Authentication(secret))
-	NewURLHandler(svc).RegisterRoutes(router)
+	NewURLHandler(svc, zap.NewNop()).RegisterRoutes(router)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
 	request.AddCookie(&http.Cookie{
@@ -844,12 +916,8 @@ func TestHandleUserURLs_InvalidCookieIsReplacedAndUnauthorized(t *testing.T) {
 		)
 	}
 
-	cookies := response.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("expected a replacement cookie, got %d", len(cookies))
-	}
-	if _, err := auth.Verify(cookies[0].Value, []byte(secret)); err != nil {
-		t.Fatalf("expected a valid replacement cookie: %v", err)
+	if got := response.Header().Get("Set-Cookie"); got != "" {
+		t.Fatalf("did not expect a replacement cookie, got %q", got)
 	}
 }
 
@@ -857,12 +925,12 @@ func TestHandleUserURLs_ReturnsOnlyAuthenticatedUserURLs(t *testing.T) {
 	const secret = "test-signing-secret"
 
 	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	svc := service.NewURLService(repo, "http://localhost:8080", zap.NewNop())
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.Authentication(secret))
-	NewURLHandler(svc).RegisterRoutes(router)
+	NewURLHandler(svc, zap.NewNop()).RegisterRoutes(router)
 
 	createRequest := httptest.NewRequest(
 		http.MethodPost,
@@ -920,12 +988,12 @@ func TestHandleUserURLs_NoContent(t *testing.T) {
 	const secret = "test-signing-secret"
 
 	repo := repository.NewMemoryRepository()
-	svc := service.NewURLService(repo, "http://localhost:8080")
+	svc := service.NewURLService(repo, "http://localhost:8080", zap.NewNop())
 
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	router.Use(middleware.Authentication(secret))
-	NewURLHandler(svc).RegisterRoutes(router)
+	NewURLHandler(svc, zap.NewNop()).RegisterRoutes(router)
 
 	request := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
 	response := httptest.NewRecorder()
@@ -948,6 +1016,7 @@ func TestGzipResponse(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -955,7 +1024,7 @@ func TestGzipResponse(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.Gzip())
 
-	h := NewURLHandler(svc)
+	h := NewURLHandler(svc, zap.NewNop())
 	h.RegisterRoutes(router)
 
 	req := httptest.NewRequest(
@@ -1009,6 +1078,7 @@ func TestGzipRequest(t *testing.T) {
 	svc := service.NewURLService(
 		repo,
 		"http://localhost:8080",
+		zap.NewNop(),
 	)
 
 	gin.SetMode(gin.TestMode)
@@ -1016,7 +1086,7 @@ func TestGzipRequest(t *testing.T) {
 	router := gin.New()
 	router.Use(middleware.Gzip())
 
-	h := NewURLHandler(svc)
+	h := NewURLHandler(svc, zap.NewNop())
 	h.RegisterRoutes(router)
 
 	var buffer bytes.Buffer

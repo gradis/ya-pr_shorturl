@@ -16,7 +16,6 @@ const CookieName = "user_id"
 var ErrInvalidToken = errors.New("invalid authentication token")
 
 type userIDContextKey struct{}
-type invalidCookieContextKey struct{}
 
 func WithUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, userIDContextKey{}, userID)
@@ -25,15 +24,6 @@ func WithUserID(ctx context.Context, userID string) context.Context {
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	userID, ok := ctx.Value(userIDContextKey{}).(string)
 	return userID, ok && userID != ""
-}
-
-func WithInvalidCookie(ctx context.Context) context.Context {
-	return context.WithValue(ctx, invalidCookieContextKey{}, true)
-}
-
-func HasInvalidCookie(ctx context.Context) bool {
-	invalid, _ := ctx.Value(invalidCookieContextKey{}).(bool)
-	return invalid
 }
 
 func NewUserID() (string, error) {

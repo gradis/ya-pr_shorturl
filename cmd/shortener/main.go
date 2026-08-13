@@ -37,10 +37,10 @@ func main() {
 	}
 	defer storage.Close()
 
-	urlService := service.NewURLServiceWithLogger(storage, cfg.BaseURL, logg)
+	urlService := service.NewURLService(storage, cfg.BaseURL, logg)
 	defer urlService.Close()
 
-	urlHandler := handler.NewURLHandler(urlService)
+	urlHandler := handler.NewURLHandler(urlService, logg)
 	pingHandler := handler.NewPingHandler(storage, logg)
 
 	router := gin.New()

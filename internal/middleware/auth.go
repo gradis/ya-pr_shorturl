@@ -13,19 +13,20 @@ func Authentication(secret string) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		userID, err := userIDFromRequest(c.Request, signingKey)
-		invalidCookie := err != nil && !errors.Is(err, http.ErrNoCookie)
-		if err != nil {
+		switch {
+		case errors.Is(err, http.ErrNoCookie):
 			userID, err = issueAuthenticationCookie(c.Writer, signingKey)
 			if err != nil {
 				c.AbortWithStatus(http.StatusInternalServerError)
 				return
 			}
+
+		case err != nil:
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
 		}
 
 		requestContext := auth.WithUserID(c.Request.Context(), userID)
-		if invalidCookie {
-			requestContext = auth.WithInvalidCookie(requestContext)
-		}
 		c.Request = c.Request.WithContext(requestContext)
 		c.Next()
 	}

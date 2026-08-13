@@ -2,10 +2,8 @@ package service
 
 import (
 	"context"
-	"strings"
 	"time"
 
-	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/repository"
 	"go.uber.org/zap"
 )
@@ -20,50 +18,6 @@ const (
 type deleteRequest struct {
 	UserID string
 	IDs    []string
-}
-
-func (s *URLService) DeleteUserURLs(
-	ctx context.Context,
-	ids []string,
-) error {
-	userID, ok := auth.UserIDFromContext(ctx)
-	if !ok {
-		return ErrUnauthorized
-	}
-
-	cleanIDs := make([]string, 0, len(ids))
-	seen := make(map[string]struct{}, len(ids))
-
-	for _, id := range ids {
-		id = strings.TrimSpace(id)
-		if id == "" {
-			continue
-		}
-
-		if _, exists := seen[id]; exists {
-			continue
-		}
-
-		seen[id] = struct{}{}
-		cleanIDs = append(cleanIDs, id)
-	}
-
-	if len(cleanIDs) == 0 {
-		return ErrInvalidURLIDs
-	}
-
-	request := deleteRequest{
-		UserID: userID,
-		IDs:    cleanIDs,
-	}
-
-	select {
-	case s.deleteQueue <- request:
-		return nil
-
-	case <-ctx.Done():
-		return ctx.Err()
-	}
 }
 
 func (s *URLService) startDeleteWorker() {
@@ -81,40 +35,11 @@ func (s *URLService) startDeleteWorker() {
 			deleteBatchSize,
 		)
 
-		flush := func() {
-			if len(batch) == 0 {
-				return
-			}
-
-			records := append(
-				[]repository.URLDeleteRecord(nil),
-				batch...,
-			)
-
-			batch = batch[:0]
-
-			ctx, cancel := context.WithTimeout(
-				context.Background(),
-				deleteQueryTimeout,
-			)
-
-			err := s.repo.DeleteBatch(ctx, records)
-			cancel()
-
-			if err != nil {
-				s.logg.Error(
-					"failed to delete URL batch",
-					zap.Int("batch_size", len(records)),
-					zap.Error(err),
-				)
-			}
-		}
-
 		for {
 			select {
 			case request, ok := <-s.deleteQueue:
 				if !ok {
-					flush()
+					batch = s.flushDeleteBatch(batch)
 					return
 				}
 
@@ -128,15 +53,44 @@ func (s *URLService) startDeleteWorker() {
 					)
 
 					if len(batch) >= deleteBatchSize {
-						flush()
+						batch = s.flushDeleteBatch(batch)
 					}
 				}
 
 			case <-ticker.C:
-				flush()
+				batch = s.flushDeleteBatch(batch)
 			}
 		}
 	}()
+}
+
+func (s *URLService) flushDeleteBatch(
+	batch []repository.URLDeleteRecord,
+) []repository.URLDeleteRecord {
+	if len(batch) == 0 {
+		return batch
+	}
+
+	records := append(
+		[]repository.URLDeleteRecord(nil),
+		batch...,
+	)
+
+	ctx, cancel := context.WithTimeout(
+		context.Background(),
+		deleteQueryTimeout,
+	)
+	defer cancel()
+
+	if err := s.repo.DeleteBatch(ctx, records); err != nil {
+		s.logg.Error(
+			"failed to delete URL batch",
+			zap.Int("batch_size", len(records)),
+			zap.Error(err),
+		)
+	}
+
+	return batch[:0]
 }
 
 func (s *URLService) Close() {

@@ -59,14 +59,16 @@ func TestAuthenticationIssuesAndAcceptsCookie(t *testing.T) {
 	}
 }
 
-func TestAuthenticationReplacesInvalidCookie(t *testing.T) {
+func TestAuthenticationRejectsInvalidCookie(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
 	const secret = "test-signing-secret"
+	handlerCalled := false
 
 	router := gin.New()
 	router.Use(Authentication(secret))
 	router.GET("/", func(c *gin.Context) {
+		handlerCalled = true
 		c.Status(http.StatusOK)
 	})
 
@@ -78,11 +80,19 @@ func TestAuthenticationReplacesInvalidCookie(t *testing.T) {
 	response := httptest.NewRecorder()
 	router.ServeHTTP(response, request)
 
-	cookies := response.Result().Cookies()
-	if len(cookies) != 1 {
-		t.Fatalf("expected a replacement cookie, got %d cookies", len(cookies))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf(
+			"expected status %d, got %d",
+			http.StatusUnauthorized,
+			response.Code,
+		)
 	}
-	if _, err := auth.Verify(cookies[0].Value, []byte(secret)); err != nil {
-		t.Fatalf("expected a valid replacement cookie: %v", err)
+
+	if got := response.Header().Get("Set-Cookie"); got != "" {
+		t.Fatalf("did not expect a replacement cookie, got %q", got)
+	}
+
+	if handlerCalled {
+		t.Fatal("expected authentication middleware to abort the request")
 	}
 }
