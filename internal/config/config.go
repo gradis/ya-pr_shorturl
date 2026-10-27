@@ -11,6 +11,8 @@ type Config struct {
 	BaseURL         string
 	FileStoragePath string
 	DatabaseDSN     string
+	AuditFile       string
+	AuditURL        string
 	AuthSecret      string
 }
 
@@ -58,6 +60,9 @@ func Parse() *Config {
 		"authentication cookie signing secret",
 	)
 
+	flag.StringVar(&cfg.AuditFile, "audit-file", "", "audit log file path")
+	flag.StringVar(&cfg.AuditURL, "audit-url", "", "audit receiver URL")
+
 	flag.Parse()
 
 	if value, ok := lookupNonEmptyEnv("SERVER_ADDRESS"); ok {
@@ -78,6 +83,13 @@ func Parse() *Config {
 
 	if value, ok := lookupNonEmptyEnv("AUTH_SECRET"); ok {
 		cfg.AuthSecret = value
+	}
+
+	if value, ok := lookupNonEmptyEnv("AUDIT_FILE"); ok {
+		cfg.AuditFile = value
+	}
+	if value, ok := lookupNonEmptyEnv("AUDIT_URL"); ok {
+		cfg.AuditURL = value
 	}
 
 	return cfg
