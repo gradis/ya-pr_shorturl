@@ -39,7 +39,7 @@ func (s *URLService) startDeleteWorker() {
 			select {
 			case request, ok := <-s.deleteQueue:
 				if !ok {
-					batch = s.flushDeleteBatch(batch)
+					s.flushDeleteBatch(batch)
 					return
 				}
 
