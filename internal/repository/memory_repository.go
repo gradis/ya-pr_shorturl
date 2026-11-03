@@ -117,7 +117,15 @@ func (r *MemoryRepository) GetByUserID(ctx context.Context, userID string) ([]UR
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	records := make([]URLRecord, 0)
+	// Count under the same read lock to allocate the exact result size.
+	// This avoids allocating intermediate slices during repeated growth.
+	count := 0
+	for _, record := range r.urls {
+		if record.UserID == userID {
+			count++
+		}
+	}
+	records := make([]URLRecord, 0, count)
 	for _, record := range r.urls {
 		if record.UserID == userID {
 			records = append(records, record)

@@ -1,0 +1,23 @@
+goos: darwin
+goarch: arm64
+pkg: github.com/gradis/ya-pr_shorturl/internal/service
+cpu: Apple M3 Pro
+BenchmarkGenerateID-11         	    1000	      1152 ns/op	     392 B/op	      25 allocs/op
+BenchmarkGenerateID-11         	    1000	      1021 ns/op	     392 B/op	      25 allocs/op
+BenchmarkGenerateID-11         	    1000	       992.1 ns/op	     392 B/op	      25 allocs/op
+BenchmarkURLService/ShortenExisting-11         	    1000	      1397 ns/op	     600 B/op	      29 allocs/op
+BenchmarkURLService/ShortenExisting-11         	    1000	      1297 ns/op	     600 B/op	      29 allocs/op
+BenchmarkURLService/ShortenExisting-11         	    1000	      1235 ns/op	     600 B/op	      29 allocs/op
+BenchmarkURLService/Batch10-11                 	    1000	     12827 ns/op	    8116 B/op	     323 allocs/op
+BenchmarkURLService/Batch10-11                 	    1000	     11442 ns/op	    8116 B/op	     323 allocs/op
+BenchmarkURLService/Batch10-11                 	    1000	     10738 ns/op	    8116 B/op	     323 allocs/op
+BenchmarkURLService/Follow-11                  	    1000	        40.04 ns/op	       0 B/op	       0 allocs/op
+BenchmarkURLService/Follow-11                  	    1000	        40.96 ns/op	       0 B/op	       0 allocs/op
+BenchmarkURLService/Follow-11                  	    1000	        39.54 ns/op	       0 B/op	       0 allocs/op
+BenchmarkURLService/List100-11                 	    1000	     14465 ns/op	   26078 B/op	     309 allocs/op
+BenchmarkURLService/List100-11                 	    1000	     14690 ns/op	   26081 B/op	     309 allocs/op
+BenchmarkURLService/List100-11                 	    1000	     14482 ns/op	   26080 B/op	     309 allocs/op
+BenchmarkProfileWorkload-11                    	    1000	     25852 ns/op	   34793 B/op	     661 allocs/op
+BenchmarkProfileWorkload-11                    	    1000	     26289 ns/op	   34797 B/op	     661 allocs/op
+BenchmarkProfileWorkload-11                    	    1000	     26668 ns/op	   34797 B/op	     661 allocs/op
+PASS
