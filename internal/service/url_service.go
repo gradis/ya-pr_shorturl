@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/url"
 	"strings"
 	"sync"
@@ -94,7 +93,7 @@ func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, er
 		return "", fmt.Errorf("save shortened URL: %w", err)
 	}
 
-	shortURL := fmt.Sprintf("%s/%s", s.baseURL, id)
+	shortURL := s.baseURL + "/" + id
 	if duplicate {
 		return shortURL, ErrURLAlreadyExists
 	}
@@ -123,7 +122,6 @@ func (s *URLService) AddBatchURLs(ctx context.Context, urls []BatchURL) ([]Batch
 
 		results = append(results, BatchURLResult{
 			CorrelationID: item.CorrelationID,
-			ShortURL:      fmt.Sprintf("%s/%s", s.baseURL, id),
 		})
 	}
 
@@ -133,7 +131,7 @@ func (s *URLService) AddBatchURLs(ctx context.Context, urls []BatchURL) ([]Batch
 	}
 
 	for i, record := range savedRecords {
-		results[i].ShortURL = fmt.Sprintf("%s/%s", s.baseURL, record.ID)
+		results[i].ShortURL = s.baseURL + "/" + record.ID
 	}
 
 	return results, nil
@@ -195,7 +193,7 @@ func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
 	urls := make([]UserURL, 0, len(records))
 	for _, record := range records {
 		urls = append(urls, UserURL{
-			ShortURL:    fmt.Sprintf("%s/%s", s.baseURL, record.ID),
+			ShortURL:    s.baseURL + "/" + record.ID,
 			OriginalURL: record.OriginalURL,
 		})
 	}
@@ -250,15 +248,25 @@ func (s *URLService) DeleteUserURLs(
 func generateID(length int) (string, error) {
 	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
+	// Reject the upper eight values so every alphabet symbol has exactly
+	// four possible byte values. Modulo without rejection would bias IDs.
+	const limit = 256 - 256%len(alphabet)
 	result := make([]byte, length)
-
-	for i := range result {
-		randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
-		if err != nil {
+	var randomBytes [32]byte
+	for written := 0; written < len(result); {
+		if _, err := rand.Read(randomBytes[:]); err != nil {
 			return "", err
 		}
-
-		result[i] = alphabet[randomIndex.Int64()]
+		for _, value := range randomBytes {
+			if int(value) >= limit {
+				continue
+			}
+			result[written] = alphabet[int(value)%len(alphabet)]
+			written++
+			if written == len(result) {
+				break
+			}
+		}
 	}
 
 	return string(result), nil

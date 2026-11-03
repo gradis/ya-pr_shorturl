@@ -1,0 +1,21 @@
+File: service.test
+Type: alloc_objects
+Time: 2026-10-27 20:23:42 +03
+Showing nodes accounting for -435000, 76.30% of 570103 total
+Dropped 80 nodes (cum <= 2850)
+      flat  flat%   sum%        cum   cum%
+   -131991 23.15% 23.15%    -176004 30.87%  crypto/rand.Int
+   -121001 21.22% 44.38%    -121036 21.23%  fmt.Sprintf
+   -100000 17.54% 61.92%    -207036 36.32%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).GetUserURLs
+    -44011  7.72% 69.64%     -44011  7.72%  math/big.nat.make (inline)
+    -30000  5.26% 74.90%    -209999 36.84%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).AddBatchURLs
+     -7000  1.23% 76.13%      -7000  1.23%  github.com/gradis/ya-pr_shorturl/internal/repository.(*MemoryRepository).GetByUserID
+     -1000  0.18% 76.30%     -17999  3.16%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).AddURL
+         3 0.00053% 76.30%    -175998 30.87%  github.com/gradis/ya-pr_shorturl/internal/service.generateID
+         0     0% 76.30%     -15999  2.81%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).saveWithUniqueID
+         0     0% 76.30%    -435034 76.31%  github.com/gradis/ya-pr_shorturl/internal/service.BenchmarkProfileWorkload
+         0     0% 76.30%     -44011  7.72%  math/big.(*Int).SetUint64 (inline)
+         0     0% 76.30%     -44011  7.72%  math/big.nat.setUint64
+         0     0% 76.30%     -44011  7.72%  math/big.nat.setWord (inline)
+         0     0% 76.30%    -435033 76.31%  testing.(*B).run1.func1
+         0     0% 76.30%    -435029 76.31%  testing.(*B).runN

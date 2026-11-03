@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/audit"
 	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 	"go.uber.org/zap"
@@ -20,17 +22,27 @@ type URLService interface {
 	DeleteUserURLs(ctx context.Context, ids []string) error
 }
 
+type AuditPublisher interface {
+	Notify(context.Context, audit.Event)
+}
+
 type URLHandler struct {
+	audit   AuditPublisher
 	service URLService
 	logg    *zap.Logger
 }
 
-func NewURLHandler(service URLService, logg *zap.Logger) *URLHandler {
+func NewURLHandler(service URLService, logg *zap.Logger, publishers ...AuditPublisher) *URLHandler {
 	if logg == nil {
 		logg = zap.NewNop()
 	}
 
+	var publisher AuditPublisher
+	if len(publishers) > 0 {
+		publisher = publishers[0]
+	}
 	return &URLHandler{
+		audit:   publisher,
 		service: service,
 		logg:    logg,
 	}
@@ -126,6 +138,7 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 	}
 
 	c.Data(http.StatusCreated, "text/plain", []byte(shortURL))
+	h.auditEvent(c, "shorten", originalURL)
 }
 
 func (h *URLHandler) handleGet(c *gin.Context) {
@@ -156,6 +169,7 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusTemporaryRedirect, originalURL)
+	h.auditEvent(c, "follow", originalURL)
 }
 
 func (h *URLHandler) handleShortenJSON(c *gin.Context) {
@@ -188,6 +202,7 @@ func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 	c.JSON(http.StatusCreated, shortenResponse{
 		Result: shortURL,
 	})
+	h.auditEvent(c, "shorten", req.URL)
 }
 
 func (h *URLHandler) handleShortenBatch(c *gin.Context) {
@@ -314,4 +329,12 @@ func (h *URLHandler) logInternalError(c *gin.Context, err error) {
 		zap.String("path", c.Request.URL.Path),
 		zap.Error(err),
 	)
+}
+
+func (h *URLHandler) auditEvent(c *gin.Context, action, originalURL string) {
+	if h.audit == nil {
+		return
+	}
+	userID, _ := auth.UserIDFromContext(c.Request.Context())
+	h.audit.Notify(context.WithoutCancel(c.Request.Context()), audit.Event{TS: time.Now().Unix(), Action: action, UserID: userID, URL: originalURL})
 }

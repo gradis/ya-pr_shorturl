@@ -1,0 +1,63 @@
+File: service.test
+Type: inuse_space
+Time: 2026-10-27 20:24:08 +03
+Showing nodes accounting for 40.30kB, 97.19% of 41.47kB total
+Dropped 75 nodes (cum <= 0.21kB)
+      flat  flat%   sum%        cum   cum%
+   34.70kB 83.69% 83.69%    34.75kB 83.80%  runtime.mallocgc
+    2.05kB  4.94% 88.62%     2.05kB  4.94%  regexp.onePassCopy
+    1.51kB  3.64% 92.26%     1.51kB  3.64%  sync.(*Pool).pinSlow
+    1.38kB  3.32% 95.57%     1.38kB  3.32%  regexp/syntax.(*compiler).inst (inline)
+    0.25kB   0.6% 96.18%     0.25kB   0.6%  time.newTimer
+    0.18kB  0.43% 96.61%     3.84kB  9.25%  regexp.compile
+    0.13kB  0.32% 96.93%     0.24kB  0.58%  time.NewTicker
+    0.11kB  0.26% 97.19%     0.35kB  0.85%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).startDeleteWorker.func1
+         0     0% 97.19%     1.74kB  4.20%  fmt.Fprintf
+         0     0% 97.19%     1.68kB  4.05%  fmt.newPrinter
+         0     0% 97.19%     6.20kB 14.94%  main.main
+         0     0% 97.19%     3.84kB  9.25%  regexp.Compile (inline)
+         0     0% 97.19%     2.06kB  4.97%  regexp.compileOnePass
+         0     0% 97.19%     1.38kB  3.32%  regexp/syntax.(*compiler).compile
+         0     0% 97.19%     1.38kB  3.32%  regexp/syntax.(*compiler).rune
+         0     0% 97.19%     1.42kB  3.43%  regexp/syntax.Compile
+         0     0% 97.19%     0.25kB   0.6%  runtime.allgadd
+         0     0% 97.19%    22.78kB 54.94%  runtime.allocm
+         0     0% 97.19%     5.50kB 13.26%  runtime.gcBgMarkWorker
+         0     0% 97.19%    10.39kB 25.06%  runtime.gcStart.func4
+         0     0% 97.19%     0.28kB  0.68%  runtime.growslice
+         0     0% 97.19%        9kB 21.70%  runtime.mProfStackInit (inline)
+         0     0% 97.19%     6.20kB 14.94%  runtime.main
+         0     0% 97.19%        9kB 21.70%  runtime.makeProfStackFP (inline)
+         0     0% 97.19%        9kB 21.70%  runtime.makeslice
+         0     0% 97.19%     9.84kB 23.74%  runtime.malg
+         0     0% 97.19%     5.20kB 12.53%  runtime.mcall
+         0     0% 97.19%    10.91kB 26.30%  runtime.mcommoninit
+         0     0% 97.19%     1.88kB  4.52%  runtime.mpreinit
+         0     0% 97.19%     7.20kB 17.35%  runtime.mstart
+         0     0% 97.19%     7.20kB 17.35%  runtime.mstart0
+         0     0% 97.19%     7.20kB 17.35%  runtime.mstart1
+         0     0% 97.19%    22.78kB 54.94%  runtime.newm
+         0     0% 97.19%    25.47kB 61.42%  runtime.newobject
+         0     0% 97.19%     6.34kB 15.30%  runtime.newproc.func1
+         0     0% 97.19%     6.34kB 15.30%  runtime.newproc1
+         0     0% 97.19%     5.20kB 12.53%  runtime.park_m
+         0     0% 97.19%    12.39kB 29.88%  runtime.resetspinning
+         0     0% 97.19%    12.39kB 29.88%  runtime.schedule
+         0     0% 97.19%    10.39kB 25.06%  runtime.startTheWorldWithSema
+         0     0% 97.19%    17.59kB 42.41%  runtime.startm
+         0     0% 97.19%    16.73kB 40.35%  runtime.systemstack
+         0     0% 97.19%    17.59kB 42.41%  runtime.wakep
+         0     0% 97.19%     2.03kB  4.90%  sync.(*Once).Do (inline)
+         0     0% 97.19%     2.03kB  4.90%  sync.(*Once).doSlow
+         0     0% 97.19%     1.68kB  4.05%  sync.(*Pool).Get
+         0     0% 97.19%     1.51kB  3.64%  sync.(*Pool).pin
+         0     0% 97.19%     1.87kB  4.50%  testing.(*B).Run
+         0     0% 97.19%     1.76kB  4.24%  testing.(*B).run
+         0     0% 97.19%     1.76kB  4.24%  testing.(*B).run.func1
+         0     0% 97.19%     2.04kB  4.92%  testing.(*B).runN
+         0     0% 97.19%     6.20kB 14.94%  testing.(*M).Run
+         0     0% 97.19%     3.87kB  9.33%  testing.newMatcher
+         0     0% 97.19%     5.73kB 13.83%  testing.runBenchmarks
+         0     0% 97.19%     1.87kB  4.50%  testing.runBenchmarks.func1
+         0     0% 97.19%     3.87kB  9.33%  testing.simpleMatch.verify
+         0     0% 97.19%     3.84kB  9.25%  testing/internal/testdeps.TestDeps.MatchString

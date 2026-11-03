@@ -1,0 +1,12 @@
+File: service.test
+Type: alloc_objects
+Time: 2026-10-27 20:23:42 +03
+Showing nodes accounting for 570103, 100% of 570103 total
+----------------------------------------------------------+-------------
+      flat  flat%   sum%        cum   cum%   calls calls% + context 	 	 
+----------------------------------------------------------+-------------
+                                            165000 90.91% |   github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).AddBatchURLs
+                                             16504  9.09% |   github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).saveWithUniqueID
+      5500  0.96%  0.96%     181504 31.84%                | github.com/gradis/ya-pr_shorturl/internal/service.generateID
+                                            176004 96.97% |   crypto/rand.Int
+----------------------------------------------------------+-------------
