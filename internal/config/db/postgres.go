@@ -12,10 +12,14 @@ import (
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
+// Postgres содержит пул соединений PostgreSQL.
 type Postgres struct {
+	// Pool — пул соединений, закрываемый методом Close.
 	Pool *pgxpool.Pool
 }
 
+// New создаёт пул по DSN, не проверяя соединение с сервером.
+// Для проверки доступности вызовите Pool.Ping; после работы вызовите Close.
 func New(ctx context.Context, dsn string) (*Postgres, error) {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -30,6 +34,8 @@ func New(ctx context.Context, dsn string) (*Postgres, error) {
 	return &Postgres{Pool: pool}, nil
 }
 
+// RunMigrations применяет неприменённые миграции из локального каталога.
+// Отсутствие новых миграций не считается ошибкой.
 func RunMigrations(dsn string, migrationsPath string) error {
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -60,6 +66,7 @@ func RunMigrations(dsn string, migrationsPath string) error {
 	return nil
 }
 
+// Close освобождает пул соединений; допустим вызов для nil получателя.
 func (p *Postgres) Close() {
 	if p != nil && p.Pool != nil {
 		p.Pool.Close()

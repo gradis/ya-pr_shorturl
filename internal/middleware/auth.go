@@ -8,6 +8,9 @@ import (
 	"github.com/gradis/ya-pr_shorturl/internal/auth"
 )
 
+// Authentication проверяет подписанную cookie и помещает ID пользователя в контекст.
+// Если cookie отсутствует, создаёт нового пользователя и выдаёт cookie.
+// Некорректная cookie отклоняется с HTTP 401.
 func Authentication(secret string) gin.HandlerFunc {
 	signingKey := []byte(secret)
 

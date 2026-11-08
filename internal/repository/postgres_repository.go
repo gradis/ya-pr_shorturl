@@ -11,22 +11,30 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// PostgresRepository хранит ссылки в PostgreSQL через пул соединений pgx.
 type PostgresRepository struct {
 	pool *pgxpool.Pool
 }
 
+// NewPostgresRepository оборачивает готовый ненулевой пул соединений.
+// Close репозитория закрывает переданный пул.
 func NewPostgresRepository(pool *pgxpool.Pool) *PostgresRepository {
 	return &PostgresRepository{pool: pool}
 }
 
+// Ping проверяет соединение с PostgreSQL с учётом контекста.
 func (r *PostgresRepository) Ping(ctx context.Context) error {
 	return r.pool.Ping(ctx)
 }
 
+// Close закрывает пул соединений PostgreSQL.
 func (r *PostgresRepository) Close() {
 	r.pool.Close()
 }
 
+// SaveURL сохраняет ссылку с владельцем из контекста.
+// Для повторного оригинального URL возвращает существующий ID и Duplicate=true.
+// При занятом ID другой ссылки возвращает ErrURLIDConflict.
 func (r *PostgresRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
 	const query = `
 INSERT INTO urls (short_url, original_url, user_id)
@@ -52,6 +60,10 @@ RETURNING short_url, (xmax = 0) AS inserted;`
 	}, nil
 }
 
+// SaveBatch сохраняет пакет ссылок и возвращает фактические ID в исходном порядке.
+// Повторные оригинальные URL используют существующие записи. Для новых записей
+// пустой UserID заполняется из контекста.
+// Пакет выполняется в одной транзакции.
 func (r *PostgresRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]URLRecord, error) {
 	const query = `
 INSERT INTO urls (short_url, original_url, user_id)
@@ -113,6 +125,8 @@ RETURNING short_url;`
 	return result, nil
 }
 
+// GetByUserID возвращает записи пользователя, включая помеченные как удалённые.
+// Результат упорядочен по внутреннему ID записи.
 func (r *PostgresRepository) GetByUserID(ctx context.Context, userID string) ([]URLRecord, error) {
 	const query = `
 SELECT short_url, original_url, user_id
@@ -142,6 +156,7 @@ ORDER BY id;`
 	return records, nil
 }
 
+// GetByID возвращает оригинальный URL, ErrURLNotFound или ErrURLDeleted.
 func (r *PostgresRepository) GetByID(
 	ctx context.Context,
 	id string,
@@ -174,6 +189,8 @@ WHERE short_url = $1;
 	return originalURL, nil
 }
 
+// DeleteBatch помечает ссылки как удалённые только при совпадении владельца.
+// Несуществующие ID и записи других пользователей пропускаются.
 func (r *PostgresRepository) DeleteBatch(
 	ctx context.Context,
 	records []URLDeleteRecord,

@@ -16,6 +16,9 @@ import (
 	"go.uber.org/zap"
 )
 
+// Event описывает успешное создание ссылки (shorten) или переход по ней (follow).
+// TS хранит Unix-время в секундах, URL — оригинальный адрес.
+// Пустой UserID опускается при сериализации JSON.
 type Event struct {
 	TS     int64  `json:"ts"`
 	Action string `json:"action"`
@@ -23,7 +26,10 @@ type Event struct {
 	URL    string `json:"url"`
 }
 
+// Observer принимает событие аудита; ошибка доставки возвращается издателю.
+// Реализация должна поддерживать конкурентные вызовы Update.
 type Observer interface {
+	// Update принимает событие аудита с контекстом доставки.
 	Update(context.Context, Event) error
 }
 
@@ -34,6 +40,8 @@ type Publisher struct {
 	logg      *zap.Logger
 }
 
+// NewPublisher фиксирует набор наблюдателей и журнал ошибок доставки.
+// При nil logg используется журнал без вывода; пустой набор допустим.
 func NewPublisher(logg *zap.Logger, observers ...Observer) *Publisher {
 	if logg == nil {
 		logg = zap.NewNop()
@@ -41,6 +49,8 @@ func NewPublisher(logg *zap.Logger, observers ...Observer) *Publisher {
 	return &Publisher{observers: append([]Observer(nil), observers...), logg: logg}
 }
 
+// Notify синхронно передаёт событие каждому наблюдателю.
+// Ошибки записываются в журнал и не прерывают доставку другим наблюдателям.
 func (p *Publisher) Notify(ctx context.Context, event Event) {
 	for _, observer := range p.observers {
 		if err := observer.Update(ctx, event); err != nil {
@@ -49,11 +59,15 @@ func (p *Publisher) Notify(ctx context.Context, event Event) {
 	}
 }
 
+// FileObserver последовательно добавляет JSON-события в файл аудита.
+// Запись и закрытие защищены мьютексом.
 type FileObserver struct {
 	mu   sync.Mutex
 	file *os.File
 }
 
+// NewFileObserver открывает или создаёт файл в режиме добавления.
+// Новый файл получает права 0600. После работы необходимо вызвать Close.
 func NewFileObserver(path string) (*FileObserver, error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
@@ -62,23 +76,29 @@ func NewFileObserver(path string) (*FileObserver, error) {
 	return &FileObserver{file: file}, nil
 }
 
+// Update добавляет событие в конец файла отдельной строкой JSON.
+// Контекст не используется для отмены файловой записи.
 func (o *FileObserver) Update(_ context.Context, event Event) error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return json.NewEncoder(o.file).Encode(event)
 }
 
+// Close закрывает файл аудита. Вызывается после завершения отправки событий.
 func (o *FileObserver) Close() error {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	return o.file.Close()
 }
 
+// HTTPObserver отправляет события JSON-запросами POST удалённому приёмнику.
 type HTTPObserver struct {
 	url    string
 	client *http.Client
 }
 
+// NewHTTPObserver создаёт приёмник для абсолютного HTTP(S) URL.
+// Таймаут запроса — пять секунд; перенаправления и повторные отправки отключены.
 func NewHTTPObserver(endpoint string) (*HTTPObserver, error) {
 	parsed, err := url.Parse(endpoint)
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
@@ -90,6 +110,8 @@ func NewHTTPObserver(endpoint string) (*HTTPObserver, error) {
 	}}, nil
 }
 
+// Update отправляет событие методом POST с Content-Type application/json.
+// Учитывает отмену контекста; статус вне диапазона 2xx считается ошибкой.
 func (o *HTTPObserver) Update(ctx context.Context, event Event) error {
 	body, err := json.Marshal(event)
 	if err != nil {

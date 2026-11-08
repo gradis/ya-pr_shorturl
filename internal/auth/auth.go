@@ -11,21 +11,26 @@ import (
 	"strings"
 )
 
+// CookieName задаёт имя cookie с подписанным идентификатором пользователя.
 const CookieName = "user_id"
 
+// ErrInvalidToken означает некорректный токен, подпись или пустые параметры подписи.
 var ErrInvalidToken = errors.New("invalid authentication token")
 
 type userIDContextKey struct{}
 
+// WithUserID возвращает дочерний контекст с идентификатором пользователя.
 func WithUserID(ctx context.Context, userID string) context.Context {
 	return context.WithValue(ctx, userIDContextKey{}, userID)
 }
 
+// UserIDFromContext извлекает непустой ID пользователя и признак его наличия.
 func UserIDFromContext(ctx context.Context) (string, bool) {
 	userID, ok := ctx.Value(userIDContextKey{}).(string)
 	return userID, ok && userID != ""
 }
 
+// NewUserID генерирует криптографически случайный ID из 16 байт в hex-формате.
 func NewUserID() (string, error) {
 	randomBytes := make([]byte, 16)
 	if _, err := rand.Read(randomBytes); err != nil {
@@ -35,6 +40,8 @@ func NewUserID() (string, error) {
 	return hex.EncodeToString(randomBytes), nil
 }
 
+// Sign подписывает ID пользователя ключом secret с помощью HMAC-SHA256.
+// Пустой ID или ключ приводит к ErrInvalidToken.
 func Sign(userID string, secret []byte) (string, error) {
 	if userID == "" || len(secret) == 0 {
 		return "", ErrInvalidToken
@@ -44,6 +51,8 @@ func Sign(userID string, secret []byte) (string, error) {
 	return userID + "." + base64.RawURLEncoding.EncodeToString(signature), nil
 }
 
+// Verify проверяет формат и подпись токена и возвращает ID пользователя.
+// Подписи сравниваются за постоянное время; неверный токен даёт ErrInvalidToken.
 func Verify(token string, secret []byte) (string, error) {
 	userID, encodedSignature, ok := strings.Cut(token, ".")
 	if !ok || userID == "" || encodedSignature == "" || len(secret) == 0 {

@@ -17,22 +17,37 @@ import (
 const defaultBaseURL = "http://localhost:8080"
 
 var (
-	ErrURLNotFound      = errors.New("url not found")
-	ErrURLDeleted       = errors.New("url deleted")
-	ErrInvalidURL       = errors.New("invalid URL")
-	ErrInvalidURLIDs    = errors.New("invalid URL ids")
+	// ErrURLNotFound указывает, что короткий ID отсутствует в хранилище.
+	ErrURLNotFound = errors.New("url not found")
+	// ErrURLDeleted указывает, что ссылка помечена как удалённая.
+	ErrURLDeleted = errors.New("url deleted")
+	// ErrInvalidURL указывает, что оригинальный URL не содержит корректные схему и хост.
+	ErrInvalidURL = errors.New("invalid URL")
+	// ErrInvalidURLIDs указывает, что после очистки не осталось ID для удаления.
+	ErrInvalidURLIDs = errors.New("invalid URL ids")
+	// ErrURLAlreadyExists сигнализирует о повторном сокращении оригинального URL.
 	ErrURLAlreadyExists = errors.New("URL already exists")
-	ErrUnauthorized     = errors.New("user is not authenticated")
+	// ErrUnauthorized указывает на отсутствие пользователя в контексте.
+	ErrUnauthorized = errors.New("user is not authenticated")
 )
 
+// URLRepository задаёт контракт хранения ссылок для URLService.
+// SaveBatch возвращает записи в порядке входного пакета с фактически сохранёнными ID.
 type URLRepository interface {
+	// SaveURL сохраняет URL или возвращает ID существующей записи.
 	SaveURL(ctx context.Context, id string, originalURL string) (repository.URLSaveResult, error)
+	// SaveBatch сохраняет пакет и возвращает записи с фактическими ID.
 	SaveBatch(ctx context.Context, records []repository.URLRecord) ([]repository.URLRecord, error)
+	// GetByID находит оригинальный URL по короткому ID.
 	GetByID(ctx context.Context, id string) (string, error)
+	// GetByUserID возвращает записи указанного пользователя.
 	GetByUserID(ctx context.Context, userID string) ([]repository.URLRecord, error)
+	// DeleteBatch помечает ссылки как удалённые с проверкой владельца.
 	DeleteBatch(ctx context.Context, records []repository.URLDeleteRecord) error
 }
 
+// URLService реализует сокращение URL и управление ссылками пользователя.
+// Конструктор запускает фоновое удаление; после работы необходимо вызвать Close.
 type URLService struct {
 	repo    URLRepository
 	baseURL string
@@ -43,21 +58,33 @@ type URLService struct {
 	closeOnce   sync.Once
 }
 
+// BatchURL содержит оригинальный URL и идентификатор сопоставления в пакете.
 type BatchURL struct {
+	// CorrelationID — идентификатор сопоставления запроса с результатом.
 	CorrelationID string
-	OriginalURL   string
-}
-
-type BatchURLResult struct {
-	CorrelationID string
-	ShortURL      string
-}
-
-type UserURL struct {
-	ShortURL    string
+	// OriginalURL — оригинальный URL.
 	OriginalURL string
 }
 
+// BatchURLResult связывает идентификатор запроса с полученным коротким URL.
+type BatchURLResult struct {
+	// CorrelationID — идентификатор сопоставления запроса с результатом.
+	CorrelationID string
+	// ShortURL — полный короткий URL, включая базовый адрес.
+	ShortURL string
+}
+
+// UserURL представляет пару короткого и оригинального URL пользователя.
+type UserURL struct {
+	// ShortURL — полный короткий URL, включая базовый адрес.
+	ShortURL string
+	// OriginalURL — оригинальный URL.
+	OriginalURL string
+}
+
+// NewURLService создаёт сервис и запускает обработчик очереди удаления.
+// Пустой baseURL заменяется http://localhost:8080, завершающие слеши удаляются.
+// При nil logg используется журнал без вывода. repo должен быть ненулевым.
 func NewURLService(
 	repo URLRepository,
 	baseURL string,
@@ -83,6 +110,9 @@ func NewURLService(
 	return service
 }
 
+// AddURL проверяет и сохраняет оригинальный URL, возвращая короткую ссылку.
+// При повторном URL возвращает существующую ссылку и ErrURLAlreadyExists.
+// Владелец новой записи берётся из контекста, если пользователь определён.
 func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, error) {
 	if !isValidURL(originalURL) {
 		return "", ErrInvalidURL
@@ -101,6 +131,8 @@ func (s *URLService) AddURL(ctx context.Context, originalURL string) (string, er
 	return shortURL, nil
 }
 
+// AddBatchURLs сокращает пакет и возвращает результаты в исходном порядке.
+// Повторные URL получают существующие ID; некорректный URL даёт ErrInvalidURL.
 func (s *URLService) AddBatchURLs(ctx context.Context, urls []BatchURL) ([]BatchURLResult, error) {
 	records := make([]repository.URLRecord, 0, len(urls))
 	results := make([]BatchURLResult, 0, len(urls))
@@ -161,6 +193,8 @@ func (s *URLService) saveWithUniqueID(ctx context.Context, originalURL string) (
 	return "", false, fmt.Errorf("failed to generate unique id after %d attempts", maxAttempts)
 }
 
+// GetURLByID возвращает оригинальный URL по короткому ID.
+// Отсутствующий ID даёт ErrURLNotFound, удалённая ссылка — ErrURLDeleted.
 func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) {
 	originalURL, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -179,6 +213,8 @@ func (s *URLService) GetURLByID(ctx context.Context, id string) (string, error) 
 	return originalURL, nil
 }
 
+// GetUserURLs возвращает ссылки пользователя из контекста.
+// При отсутствии пользователя возвращает ErrUnauthorized; порядок зависит от хранилища.
 func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
 	userID, ok := auth.UserIDFromContext(ctx)
 	if !ok {
@@ -201,6 +237,10 @@ func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
 	return urls, nil
 }
 
+// DeleteUserURLs удаляет пустые и повторные ID и ставит запрос в очередь.
+// Требует пользователя в контексте. Успешный возврат означает принятие запроса,
+// а не завершение удаления. При отмене контекста может вернуть его ошибку.
+// Не следует вызывать после Close или одновременно с ним.
 func (s *URLService) DeleteUserURLs(
 	ctx context.Context,
 	ids []string,

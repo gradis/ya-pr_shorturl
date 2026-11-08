@@ -20,6 +20,8 @@ type gzipResponseWriter struct {
 	writer *gzip.Writer
 }
 
+// Gzip распаковывает gzip-тело запроса и при поддержке клиентом сжимает
+// ответы application/json и text/html. Некорректный gzip-заголовок тела даёт HTTP 400.
 func Gzip() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		if hasGzipEncoding(c.GetHeader("Content-Encoding")) {
