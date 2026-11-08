@@ -39,7 +39,7 @@ func (s *URLService) startDeleteWorker() {
 			select {
 			case request, ok := <-s.deleteQueue:
 				if !ok {
-					batch = s.flushDeleteBatch(batch)
+					s.flushDeleteBatch(batch)
 					return
 				}
 
@@ -93,6 +93,8 @@ func (s *URLService) flushDeleteBatch(
 	return batch[:0]
 }
 
+// Close закрывает очередь и ждёт обработки всех принятых запросов удаления.
+// Повторные вызовы безопасны. Перед вызовом следует прекратить приём новых запросов.
 func (s *URLService) Close() {
 	s.closeOnce.Do(func() {
 		close(s.deleteQueue)

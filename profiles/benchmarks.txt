@@ -1,0 +1,38 @@
+?   	github.com/gradis/ya-pr_shorturl/cmd/shortener	[no test files]
+PASS
+ok  	github.com/gradis/ya-pr_shorturl/internal/audit	0.286s
+?   	github.com/gradis/ya-pr_shorturl/internal/auth	[no test files]
+PASS
+ok  	github.com/gradis/ya-pr_shorturl/internal/config	0.241s
+?   	github.com/gradis/ya-pr_shorturl/internal/config/db	[no test files]
+goos: darwin
+goarch: arm64
+pkg: github.com/gradis/ya-pr_shorturl/internal/handler
+cpu: Apple M3 Pro
+BenchmarkFollowHandler-11    	  111963	      1027 ns/op	    1490 B/op	      16 allocs/op
+PASS
+ok  	github.com/gradis/ya-pr_shorturl/internal/handler	0.498s
+?   	github.com/gradis/ya-pr_shorturl/internal/logger	[no test files]
+PASS
+ok  	github.com/gradis/ya-pr_shorturl/internal/middleware	0.313s
+goos: darwin
+goarch: arm64
+pkg: github.com/gradis/ya-pr_shorturl/internal/repository
+cpu: Apple M3 Pro
+BenchmarkMemoryRepository/GetByID-11         	 7294087	        14.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkMemoryRepository/GetByUserID-11     	    5982	     18526 ns/op	    6144 B/op	       1 allocs/op
+BenchmarkMemoryRepository/SaveExisting-11    	 9154132	        12.96 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/gradis/ya-pr_shorturl/internal/repository	0.574s
+goos: darwin
+goarch: arm64
+pkg: github.com/gradis/ya-pr_shorturl/internal/service
+cpu: Apple M3 Pro
+BenchmarkGenerateID-11         	  412210	       270.7 ns/op	       8 B/op	       1 allocs/op
+BenchmarkURLService/ShortenExisting-11         	  274830	       431.2 ns/op	     184 B/op	       3 allocs/op
+BenchmarkURLService/Batch10-11                 	   28599	      4187 ns/op	    3312 B/op	      33 allocs/op
+BenchmarkURLService/Follow-11                  	 4242174	        27.67 ns/op	       0 B/op	       0 allocs/op
+BenchmarkURLService/List100-11                 	    7360	     16476 ns/op	   12800 B/op	     102 allocs/op
+BenchmarkProfileWorkload-11                    	    5650	     21759 ns/op	   16296 B/op	     138 allocs/op
+PASS
+ok  	github.com/gradis/ya-pr_shorturl/internal/service	0.964s

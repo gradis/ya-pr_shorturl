@@ -1,0 +1,26 @@
+File: service.test
+Type: alloc_space
+Time: 2026-10-27 20:23:42 +03
+Showing nodes accounting for 34572.19kB, 99.76% of 34655.87kB total
+Dropped 173 nodes (cum <= 173.28kB)
+      flat  flat%   sum%        cum   cum%
+15828.12kB 45.67% 45.67% 15828.12kB 45.67%  github.com/gradis/ya-pr_shorturl/internal/repository.(*MemoryRepository).GetByUserID
+    6500kB 18.76% 64.43% 25469.52kB 73.49%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).GetUserURLs
+ 3850.28kB 11.11% 75.54%  3868.39kB 11.16%  fmt.Sprintf
+ 3437.36kB  9.92% 85.46%  4125.16kB 11.90%  crypto/rand.Int
+ 1546.88kB  4.46% 89.92%  1546.88kB  4.46%  net/url.parse
+    1500kB  4.33% 94.25%  7921.88kB 22.86%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).AddBatchURLs
+ 1092.45kB  3.15% 97.40%  1092.45kB  3.15%  github.com/gradis/ya-pr_shorturl/internal/repository.(*MemoryRepository).SaveBatch
+  687.67kB  1.98% 99.39%   687.67kB  1.98%  math/big.nat.make (inline)
+   85.94kB  0.25% 99.63%  4211.09kB 12.15%  github.com/gradis/ya-pr_shorturl/internal/service.generateID
+   31.25kB  0.09% 99.72%   586.09kB  1.69%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).AddURL
+   11.95kB 0.034% 99.76%   617.62kB  1.78%  github.com/gradis/ya-pr_shorturl/internal/service.benchmarkService
+    0.28kB 0.00081% 99.76% 34601.34kB 99.84%  testing.(*B).runN
+         0     0% 99.76%   382.97kB  1.11%  github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).saveWithUniqueID
+         0     0% 99.76% 34595.12kB 99.82%  github.com/gradis/ya-pr_shorturl/internal/service.BenchmarkProfileWorkload
+         0     0% 99.76%  1546.88kB  4.46%  github.com/gradis/ya-pr_shorturl/internal/service.isValidURL
+         0     0% 99.76%   687.67kB  1.98%  math/big.(*Int).SetUint64 (inline)
+         0     0% 99.76%   687.67kB  1.98%  math/big.nat.setUint64
+         0     0% 99.76%   687.67kB  1.98%  math/big.nat.setWord (inline)
+         0     0% 99.76%  1546.88kB  4.46%  net/url.ParseRequestURI
+         0     0% 99.76% 34596.42kB 99.83%  testing.(*B).run1.func1

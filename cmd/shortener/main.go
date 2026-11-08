@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/audit"
 	"github.com/gradis/ya-pr_shorturl/internal/config"
 	"github.com/gradis/ya-pr_shorturl/internal/handler"
 	"github.com/gradis/ya-pr_shorturl/internal/logger"
@@ -40,7 +41,24 @@ func main() {
 	urlService := service.NewURLService(storage, cfg.BaseURL, logg)
 	defer urlService.Close()
 
-	urlHandler := handler.NewURLHandler(urlService, logg)
+	var observers []audit.Observer
+	if cfg.AuditFile != "" {
+		fileObserver, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			logg.Fatal("failed to initialize file audit", zap.Error(err))
+		}
+		defer fileObserver.Close()
+		observers = append(observers, fileObserver)
+	}
+	if cfg.AuditURL != "" {
+		httpObserver, err := audit.NewHTTPObserver(cfg.AuditURL)
+		if err != nil {
+			logg.Fatal("failed to initialize HTTP audit", zap.Error(err))
+		}
+		observers = append(observers, httpObserver)
+	}
+	publisher := audit.NewPublisher(logg, observers...)
+	urlHandler := handler.NewURLHandler(urlService, logg, publisher)
 	pingHandler := handler.NewPingHandler(storage, logg)
 
 	router := gin.New()

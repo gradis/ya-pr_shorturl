@@ -14,6 +14,8 @@ import (
 	"github.com/gradis/ya-pr_shorturl/internal/auth"
 )
 
+// FileRepository хранит ссылки в памяти и сохраняет изменения в JSON Lines.
+// Запись выполняется через временный файл и переименование; методы защищены мьютексом.
 type FileRepository struct {
 	mu          sync.RWMutex
 	filePath    string
@@ -21,6 +23,7 @@ type FileRepository struct {
 	originalIDs map[string]string
 }
 
+// FileRecord описывает JSON-представление записи в файловом хранилище.
 type FileRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
@@ -29,6 +32,9 @@ type FileRecord struct {
 	IsDeleted   bool   `json:"is_deleted,omitempty"`
 }
 
+// NewFileRepository загружает ссылки из файла. Отсутствующий файл допустим.
+// Пустой путь отключает сохранение на диск; поддерживается чтение JSON Lines
+// и прежнего формата JSON-массива.
 func NewFileRepository(filePath string) (*FileRepository, error) {
 	repo := &FileRepository{
 		filePath:    filePath,
@@ -43,12 +49,17 @@ func NewFileRepository(filePath string) (*FileRepository, error) {
 	return repo, nil
 }
 
+// Ping всегда возвращает nil: локальному хранилищу не нужно соединение с БД.
 func (r *FileRepository) Ping(context.Context) error {
 	return nil
 }
 
+// Close не выполняет действий: хранилище не держит открытых файлов или соединений.
 func (r *FileRepository) Close() {}
 
+// SaveURL сохраняет ссылку с владельцем из контекста.
+// Для повторного оригинального URL возвращает существующий ID и Duplicate=true.
+// При занятом ID другой ссылки возвращает ErrURLIDConflict.
 func (r *FileRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return URLSaveResult{}, err
@@ -85,6 +96,9 @@ func (r *FileRepository) SaveURL(ctx context.Context, id string, originalURL str
 	return URLSaveResult{ID: id}, nil
 }
 
+// SaveBatch сохраняет пакет ссылок и возвращает фактические ID в исходном порядке.
+// Повторные оригинальные URL используют существующие записи. Для новых записей
+// пустой UserID заполняется из контекста.
 func (r *FileRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]URLRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -140,6 +154,7 @@ func (r *FileRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]
 	return result, nil
 }
 
+// GetByID возвращает оригинальный URL, ErrURLNotFound или ErrURLDeleted.
 func (r *FileRepository) GetByID(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -160,6 +175,8 @@ func (r *FileRepository) GetByID(ctx context.Context, id string) (string, error)
 	return record.OriginalURL, nil
 }
 
+// GetByUserID возвращает записи пользователя, включая помеченные как удалённые.
+// Порядок записей не определён.
 func (r *FileRepository) GetByUserID(ctx context.Context, userID string) ([]URLRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -168,7 +185,15 @@ func (r *FileRepository) GetByUserID(ctx context.Context, userID string) ([]URLR
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	records := make([]URLRecord, 0)
+	// Count under the same read lock to allocate the exact result size.
+	// This avoids allocating intermediate slices during repeated growth.
+	count := 0
+	for _, record := range r.urls {
+		if record.UserID == userID {
+			count++
+		}
+	}
+	records := make([]URLRecord, 0, count)
 	for _, record := range r.urls {
 		if record.UserID == userID {
 			records = append(records, record)
@@ -178,6 +203,7 @@ func (r *FileRepository) GetByUserID(ctx context.Context, userID string) ([]URLR
 	return records, nil
 }
 
+// Exists сообщает, занят ли короткий ID, включая помеченные как удалённые записи.
 func (r *FileRepository) Exists(id string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -186,6 +212,8 @@ func (r *FileRepository) Exists(id string) bool {
 	return ok
 }
 
+// DeleteBatch помечает ссылки как удалённые только при совпадении владельца.
+// Несуществующие ID и записи других пользователей пропускаются.
 func (r *FileRepository) DeleteBatch(ctx context.Context, records []URLDeleteRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err

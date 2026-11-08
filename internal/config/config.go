@@ -6,14 +6,27 @@ import (
 	"strings"
 )
 
+// Config содержит настройки HTTP-сервера, хранилища, аутентификации и аудита.
 type Config struct {
-	ServerAddress   string
-	BaseURL         string
+	// ServerAddress — адрес прослушивания HTTP-сервера.
+	ServerAddress string
+	// BaseURL — базовый URL для формирования коротких ссылок.
+	BaseURL string
+	// FileStoragePath — путь к файлу хранения ссылок; пустой путь отключает файловое хранение.
 	FileStoragePath string
-	DatabaseDSN     string
-	AuthSecret      string
+	// DatabaseDSN — DSN PostgreSQL; при заданном значении БД имеет приоритет над файлом.
+	DatabaseDSN string
+	// AuditFile — путь к JSON Lines файлу аудита; пустое значение отключает приёмник.
+	AuditFile string
+	// AuditURL — абсолютный HTTP(S) URL приёмника аудита; пустое значение отключает приёмник.
+	AuditURL string
+	// AuthSecret — ключ HMAC для подписи и проверки cookie пользователя.
+	AuthSecret string
 }
 
+// Parse регистрирует флаги в flag.CommandLine и читает аргументы процесса.
+// Непустые переменные окружения переопределяют значения флагов.
+// Предназначена для однократного вызова при запуске приложения.
 func Parse() *Config {
 	cfg := &Config{
 		ServerAddress:   "localhost:8080",
@@ -58,6 +71,9 @@ func Parse() *Config {
 		"authentication cookie signing secret",
 	)
 
+	flag.StringVar(&cfg.AuditFile, "audit-file", "", "audit log file path")
+	flag.StringVar(&cfg.AuditURL, "audit-url", "", "audit receiver URL")
+
 	flag.Parse()
 
 	if value, ok := lookupNonEmptyEnv("SERVER_ADDRESS"); ok {
@@ -78,6 +94,13 @@ func Parse() *Config {
 
 	if value, ok := lookupNonEmptyEnv("AUTH_SECRET"); ok {
 		cfg.AuthSecret = value
+	}
+
+	if value, ok := lookupNonEmptyEnv("AUDIT_FILE"); ok {
+		cfg.AuditFile = value
+	}
+	if value, ok := lookupNonEmptyEnv("AUDIT_URL"); ok {
+		cfg.AuditURL = value
 	}
 
 	return cfg

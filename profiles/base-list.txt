@@ -1,0 +1,84 @@
+Total: 33.84MB
+ROUTINE ======================== github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).AddBatchURLs in /Users/gradis/dev/ya-pr_shorturl/internal/service/url_service.go
+    1.46MB     7.74MB (flat, cum) 22.86% of Total
+         .          .    105:func (s *URLService) AddBatchURLs(ctx context.Context, urls []BatchURL) ([]BatchURLResult, error) {
+  562.50kB   562.50kB    106:	records := make([]repository.URLRecord, 0, len(urls))
+  312.50kB   312.50kB    107:	results := make([]BatchURLResult, 0, len(urls))
+         .          .    108:
+         .          .    109:	for _, item := range urls {
+         .     1.37MB    110:		if !isValidURL(item.OriginalURL) {
+         .          .    111:			return nil, ErrInvalidURL
+         .          .    112:		}
+         .          .    113:
+         .     3.74MB    114:		id, err := generateID(8)
+         .          .    115:		if err != nil {
+         .          .    116:			return nil, err
+         .          .    117:		}
+         .          .    118:
+         .          .    119:		records = append(records, repository.URLRecord{
+         .          .    120:			ID:          id,
+         .          .    121:			OriginalURL: item.OriginalURL,
+         .          .    122:		})
+         .          .    123:
+         .          .    124:		results = append(results, BatchURLResult{
+         .          .    125:			CorrelationID: item.CorrelationID,
+  312.50kB      625kB    126:			ShortURL:      fmt.Sprintf("%s/%s", s.baseURL, id),
+         .          .    127:		})
+         .          .    128:	}
+         .          .    129:
+         .   562.50kB    130:	savedRecords, err := s.repo.SaveBatch(ctx, records)
+         .          .    131:	if err != nil {
+         .          .    132:		return nil, fmt.Errorf("save shortened URL batch: %w", err)
+         .          .    133:	}
+         .          .    134:
+         .          .    135:	for i, record := range savedRecords {
+  312.50kB      625kB    136:		results[i].ShortURL = fmt.Sprintf("%s/%s", s.baseURL, record.ID)
+         .          .    137:	}
+         .          .    138:
+         .          .    139:	return results, nil
+         .          .    140:}
+         .          .    141:
+ROUTINE ======================== github.com/gradis/ya-pr_shorturl/internal/service.(*URLService).GetUserURLs in /Users/gradis/dev/ya-pr_shorturl/internal/service/url_service.go
+    6.35MB    24.87MB (flat, cum) 73.49% of Total
+         .          .    184:func (s *URLService) GetUserURLs(ctx context.Context) ([]UserURL, error) {
+         .          .    185:	userID, ok := auth.UserIDFromContext(ctx)
+         .          .    186:	if !ok {
+         .          .    187:		return nil, ErrUnauthorized
+         .          .    188:	}
+         .          .    189:
+         .    15.46MB    190:	records, err := s.repo.GetByUserID(ctx, userID)
+         .          .    191:	if err != nil {
+         .          .    192:		return nil, fmt.Errorf("get user URLs: %w", err)
+         .          .    193:	}
+         .          .    194:
+    3.30MB     3.30MB    195:	urls := make([]UserURL, 0, len(records))
+         .          .    196:	for _, record := range records {
+         .          .    197:		urls = append(urls, UserURL{
+    3.05MB     6.12MB    198:			ShortURL:    fmt.Sprintf("%s/%s", s.baseURL, record.ID),
+         .          .    199:			OriginalURL: record.OriginalURL,
+         .          .    200:		})
+         .          .    201:	}
+         .          .    202:
+         .          .    203:	return urls, nil
+ROUTINE ======================== github.com/gradis/ya-pr_shorturl/internal/service.generateID in /Users/gradis/dev/ya-pr_shorturl/internal/service/url_service.go
+   85.94kB     4.11MB (flat, cum) 12.15% of Total
+         .          .    250:func generateID(length int) (string, error) {
+         .          .    251:	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+         .          .    252:
+         .          .    253:	result := make([]byte, length)
+         .          .    254:
+         .          .    255:	for i := range result {
+         .     4.03MB    256:		randomIndex, err := rand.Int(rand.Reader, big.NewInt(int64(len(alphabet))))
+         .          .    257:		if err != nil {
+         .          .    258:			return "", err
+         .          .    259:		}
+         .          .    260:
+         .          .    261:		result[i] = alphabet[randomIndex.Int64()]
+         .          .    262:	}
+         .          .    263:
+   85.94kB    85.94kB    264:	return string(result), nil
+         .          .    265:}
+         .          .    266:
+         .          .    267:func isValidURL(value string) bool {
+         .          .    268:	parsedURL, err := url.ParseRequestURI(value)
+         .          .    269:	if err != nil {

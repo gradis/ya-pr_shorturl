@@ -7,12 +7,15 @@ import (
 	"github.com/gradis/ya-pr_shorturl/internal/auth"
 )
 
+// MemoryRepository хранит ссылки и индекс оригинальных URL в памяти.
+// Методы защищены мьютексом и допускают конкурентные запросы.
 type MemoryRepository struct {
 	mu          sync.RWMutex
 	urls        map[string]URLRecord
 	originalIDs map[string]string
 }
 
+// NewMemoryRepository создаёт пустое хранилище в памяти.
 func NewMemoryRepository() *MemoryRepository {
 	return &MemoryRepository{
 		urls:        make(map[string]URLRecord),
@@ -20,12 +23,17 @@ func NewMemoryRepository() *MemoryRepository {
 	}
 }
 
+// Ping всегда возвращает nil: локальному хранилищу не нужно соединение с БД.
 func (r *MemoryRepository) Ping(context.Context) error {
 	return nil
 }
 
+// Close не выполняет действий: хранилище не держит открытых файлов или соединений.
 func (r *MemoryRepository) Close() {}
 
+// SaveURL сохраняет ссылку с владельцем из контекста.
+// Для повторного оригинального URL возвращает существующий ID и Duplicate=true.
+// При занятом ID другой ссылки возвращает ErrURLIDConflict.
 func (r *MemoryRepository) SaveURL(ctx context.Context, id string, originalURL string) (URLSaveResult, error) {
 	if err := ctx.Err(); err != nil {
 		return URLSaveResult{}, err
@@ -56,6 +64,9 @@ func (r *MemoryRepository) SaveURL(ctx context.Context, id string, originalURL s
 	return URLSaveResult{ID: id}, nil
 }
 
+// SaveBatch сохраняет пакет ссылок и возвращает фактические ID в исходном порядке.
+// Повторные оригинальные URL используют существующие записи. Для новых записей
+// пустой UserID заполняется из контекста.
 func (r *MemoryRepository) SaveBatch(ctx context.Context, records []URLRecord) ([]URLRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -89,6 +100,7 @@ func (r *MemoryRepository) SaveBatch(ctx context.Context, records []URLRecord) (
 	return result, nil
 }
 
+// GetByID возвращает оригинальный URL, ErrURLNotFound или ErrURLDeleted.
 func (r *MemoryRepository) GetByID(ctx context.Context, id string) (string, error) {
 	if err := ctx.Err(); err != nil {
 		return "", err
@@ -109,6 +121,8 @@ func (r *MemoryRepository) GetByID(ctx context.Context, id string) (string, erro
 	return record.OriginalURL, nil
 }
 
+// GetByUserID возвращает записи пользователя, включая помеченные как удалённые.
+// Порядок записей не определён.
 func (r *MemoryRepository) GetByUserID(ctx context.Context, userID string) ([]URLRecord, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -117,7 +131,15 @@ func (r *MemoryRepository) GetByUserID(ctx context.Context, userID string) ([]UR
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	records := make([]URLRecord, 0)
+	// Count under the same read lock to allocate the exact result size.
+	// This avoids allocating intermediate slices during repeated growth.
+	count := 0
+	for _, record := range r.urls {
+		if record.UserID == userID {
+			count++
+		}
+	}
+	records := make([]URLRecord, 0, count)
 	for _, record := range r.urls {
 		if record.UserID == userID {
 			records = append(records, record)
@@ -127,6 +149,8 @@ func (r *MemoryRepository) GetByUserID(ctx context.Context, userID string) ([]UR
 	return records, nil
 }
 
+// DeleteBatch помечает ссылки как удалённые только при совпадении владельца.
+// Несуществующие ID и записи других пользователей пропускаются.
 func (r *MemoryRepository) DeleteBatch(ctx context.Context, records []URLDeleteRecord) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -152,6 +176,7 @@ func (r *MemoryRepository) DeleteBatch(ctx context.Context, records []URLDeleteR
 	return nil
 }
 
+// Exists сообщает, занят ли короткий ID, включая помеченные как удалённые записи.
 func (r *MemoryRepository) Exists(id string) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()

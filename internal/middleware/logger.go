@@ -7,6 +7,8 @@ import (
 	"go.uber.org/zap"
 )
 
+// RequestLogger записывает метод, URI, статус, длительность и размер ответа.
+// log должен быть ненулевым.
 func RequestLogger(log *zap.Logger) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()

@@ -5,32 +5,57 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gradis/ya-pr_shorturl/internal/audit"
 	"github.com/gradis/ya-pr_shorturl/internal/auth"
 	"github.com/gradis/ya-pr_shorturl/internal/service"
 	"go.uber.org/zap"
 )
 
+// URLService задаёт операции над ссылками, необходимые HTTP-хэндлерам.
 type URLService interface {
+	// AddURL сокращает один URL.
 	AddURL(ctx context.Context, originalURL string) (string, error)
+	// AddBatchURLs сокращает пакет с сохранением порядка результатов.
 	AddBatchURLs(ctx context.Context, urls []service.BatchURL) ([]service.BatchURLResult, error)
+	// GetURLByID возвращает оригинальный URL по короткому ID.
 	GetURLByID(ctx context.Context, id string) (string, error)
+	// GetUserURLs возвращает ссылки пользователя из контекста.
 	GetUserURLs(ctx context.Context) ([]service.UserURL, error)
+	// DeleteUserURLs ставит удаление ссылок пользователя в очередь.
 	DeleteUserURLs(ctx context.Context, ids []string) error
 }
 
+// AuditPublisher уведомляет приёмников о событиях успешных запросов.
+type AuditPublisher interface {
+	// Notify передаёт событие приёмникам аудита.
+	Notify(context.Context, audit.Event)
+}
+
+// URLHandler обрабатывает создание, получение и удаление коротких ссылок.
+// Зависимости задаются через NewURLHandler; маршруты подключаются RegisterRoutes.
 type URLHandler struct {
+	audit   AuditPublisher
 	service URLService
 	logg    *zap.Logger
 }
 
-func NewURLHandler(service URLService, logg *zap.Logger) *URLHandler {
+// NewURLHandler создаёт хэндлер с сервисом и журналом.
+// При nil logg используется журнал без вывода. Если передан издатель аудита,
+// используется первый; без издателя аудит отключён.
+func NewURLHandler(service URLService, logg *zap.Logger, publishers ...AuditPublisher) *URLHandler {
 	if logg == nil {
 		logg = zap.NewNop()
 	}
 
+	var publisher AuditPublisher
+	if len(publishers) > 0 {
+		publisher = publishers[0]
+	}
 	return &URLHandler{
+		audit:   publisher,
 		service: service,
 		logg:    logg,
 	}
@@ -59,6 +84,18 @@ type userURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// RegisterRoutes регистрирует эндпоинты сервиса на переданном роутере.
+//
+// Маршруты:
+//   - POST / — сокращение URL из текстового тела (201; повторный URL — 409).
+//   - POST /api/shorten — сокращение JSON {"url":"..."} (201 или 409).
+//   - POST /api/shorten/batch — сокращение пакета с correlation_id (201).
+//   - GET /{id} — перенаправление на оригинальный URL (307; удалённый — 410).
+//   - GET /api/user/urls — ссылки пользователя (200; пустой список — 204).
+//   - DELETE /api/user/urls — постановка удаления ссылок в очередь (202).
+//
+// Для пользовательских маршрутов требуется ID пользователя в контексте;
+// его устанавливает middleware.Authentication. Неизвестный ID возвращает 404.
 func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
 	router.POST("/", h.handlePost)
 	router.GET("/:id", h.handleGet)
@@ -68,6 +105,7 @@ func (h *URLHandler) RegisterRoutes(router gin.IRouter) {
 	router.DELETE("/api/user/urls", h.handleDeleteUserURLs)
 }
 
+// handleUserURLs возвращает ссылки текущего пользователя в GET /api/user/urls.
 func (h *URLHandler) handleUserURLs(c *gin.Context) {
 	if _, ok := auth.UserIDFromContext(c.Request.Context()); !ok {
 		c.Status(http.StatusUnauthorized)
@@ -101,6 +139,7 @@ func (h *URLHandler) handleUserURLs(c *gin.Context) {
 	c.JSON(http.StatusOK, response)
 }
 
+// handlePost сокращает URL из текстового тела запроса POST /.
 func (h *URLHandler) handlePost(c *gin.Context) {
 	body, err := c.GetRawData()
 	if err != nil {
@@ -126,8 +165,10 @@ func (h *URLHandler) handlePost(c *gin.Context) {
 	}
 
 	c.Data(http.StatusCreated, "text/plain", []byte(shortURL))
+	h.auditEvent(c, "shorten", originalURL)
 }
 
+// handleGet обрабатывает GET /{id} и перенаправляет на оригинальный URL.
 func (h *URLHandler) handleGet(c *gin.Context) {
 	id := strings.TrimSpace(c.Param("id"))
 	if id == "" {
@@ -156,8 +197,10 @@ func (h *URLHandler) handleGet(c *gin.Context) {
 	}
 
 	c.Redirect(http.StatusTemporaryRedirect, originalURL)
+	h.auditEvent(c, "follow", originalURL)
 }
 
+// handleShortenJSON обрабатывает POST /api/shorten с JSON-телом.
 func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 	var req shortenRequest
 
@@ -188,8 +231,10 @@ func (h *URLHandler) handleShortenJSON(c *gin.Context) {
 	c.JSON(http.StatusCreated, shortenResponse{
 		Result: shortURL,
 	})
+	h.auditEvent(c, "shorten", req.URL)
 }
 
+// handleShortenBatch обрабатывает пакет URL в POST /api/shorten/batch.
 func (h *URLHandler) handleShortenBatch(c *gin.Context) {
 	var req []batchShortenRequest
 
@@ -260,6 +305,7 @@ func (h *URLHandler) handleJSONServiceError(c *gin.Context, err error) {
 	)
 }
 
+// handleDeleteUserURLs принимает массив ID для асинхронного удаления.
 func (h *URLHandler) handleDeleteUserURLs(c *gin.Context) {
 	ctx := c.Request.Context()
 
@@ -314,4 +360,12 @@ func (h *URLHandler) logInternalError(c *gin.Context, err error) {
 		zap.String("path", c.Request.URL.Path),
 		zap.Error(err),
 	)
+}
+
+func (h *URLHandler) auditEvent(c *gin.Context, action, originalURL string) {
+	if h.audit == nil {
+		return
+	}
+	userID, _ := auth.UserIDFromContext(c.Request.Context())
+	h.audit.Notify(context.WithoutCancel(c.Request.Context()), audit.Event{TS: time.Now().Unix(), Action: action, UserID: userID, URL: originalURL})
 }

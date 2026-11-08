@@ -3,7 +3,10 @@ package repository
 import "errors"
 
 var (
-	ErrURLNotFound   = errors.New("URL not found")
+	// ErrURLNotFound указывает, что короткий ID отсутствует в хранилище.
+	ErrURLNotFound = errors.New("URL not found")
+	// ErrURLIDConflict указывает, что короткий ID уже занят другой записью.
 	ErrURLIDConflict = errors.New("URL id conflict")
-	ErrURLDeleted    = errors.New("URL deleted")
+	// ErrURLDeleted указывает, что ссылка помечена как удалённая.
+	ErrURLDeleted = errors.New("URL deleted")
 )
